@@ -1,0 +1,9 @@
+.env
+*.env
+__pycache__/
+*.pyc
+chat_logs.db
+chroma_db/
+raw_papers/
+node_modules/
+.next/

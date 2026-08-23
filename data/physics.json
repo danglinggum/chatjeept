@@ -1,0 +1,66 @@
+[
+  {
+    "id": "PHY-2023-ADV-01",
+    "exam": "JEE Advanced 2023",
+    "topic": "Rotational Dynamics & Torque",
+    "difficulty": "Hard",
+    "question": "A uniform solid cylinder of mass $M$ and radius $R$ is placed on a rough horizontal surface. A horizontal force $F$ is applied at the top edge of the cylinder. Find the acceleration of the center of mass and the minimum coefficient of friction $\\mu$ required for pure rolling without slipping.",
+    "solution": "1. Equations of motion: $F + f_s = Ma_{cm}$, Torque about CM: $(F - f_s)R = I_{cm}\\alpha = \\left(\\frac{1}{2}MR^2\\right)\\alpha$.\n2. Pure rolling condition: $a_{cm} = R\\alpha$.\n3. Solving gives $a_{cm} = \\frac{4F}{3M}$ and $f_s = \\frac{F}{3}$.\n4. For no slipping: $f_s \\le \\mu N \\implies \\mu \\ge \\frac{F}{3Mg}$.",
+    "visual_tags": [
+      "cylinder",
+      "force_arrow",
+      "friction_vector"
+    ]
+  },
+  {
+    "id": "PHY-2022-MAIN-02",
+    "exam": "JEE Main 2022",
+    "topic": "Electrostatics & Dipole",
+    "difficulty": "Medium",
+    "question": "An electric dipole with dipole moment $\\vec{p} = (2\\hat{i} + 3\\hat{j}) \\times 10^{-29}\\text{ C}\\cdot\\text{m}$ is placed in an electric field $\\vec{E} = 4\\hat{i} \\times 10^5\\text{ N/C}$. Calculate the torque $\\vec{\\tau}$ acting on the dipole and the work done to align it parallel to $\\vec{E}$.",
+    "solution": "1. Torque: $\\vec{\\tau} = \\vec{p} \\times \\vec{E} = (2\\hat{i} + 3\\hat{j}) \\times (4\\hat{i}) \\times 10^{-24} = -12\\hat{k} \\times 10^{-24}\\text{ N}\\cdot\\text{m}$.\n2. Potential Energy: $U = -\\vec{p} \\cdot \\vec{E}$. Work done: $W = U_f - U_i = -pE\\cos 0^\\circ - (-pE\\cos\\theta)$.",
+    "visual_tags": [
+      "dipole_axis",
+      "electric_field_vector",
+      "torque_vector"
+    ]
+  },
+  {
+    "id": "PHY-2023-ADV-P1-01",
+    "exam": "JEE Advanced 2023",
+    "topic": "Rotational Mechanics & Pure Rolling",
+    "difficulty": "Hard",
+    "question": "A uniform solid cylinder of mass $M$ and radius $R$ is placed on a rough horizontal floor with coefficient of friction $\\mu$. A constant horizontal force $F$ is applied tangentially at the top of the cylinder. Determine the linear acceleration $a_{cm}$ and the minimum coefficient of friction $\\mu_{min}$ for rolling without slipping.",
+    "solution": "1. Dynamics: Force equation $F + f = M a_{cm}$. Torque about CM: $(F - f)R = I_{cm}\\alpha = \\left(\\frac{1}{2}MR^2\\right)\\alpha$.\n2. Pure rolling: $a_{cm} = R\\alpha \\implies F - f = \\frac{1}{2} M a_{cm}$.\n3. Solving gives $a_{cm} = \\frac{4F}{3M}$ and static friction $f = \\frac{F}{3}$.\n4. For no slipping: $f \\le \\mu N = \\mu Mg \\implies \\mu_{min} = \\frac{F}{3Mg}$.",
+    "visual_tags": [
+      "cylinder",
+      "force_vector",
+      "friction_vector"
+    ]
+  },
+  {
+    "id": "PHY-2022-ADV-P2-04",
+    "exam": "JEE Advanced 2022",
+    "topic": "Electromagnetism & Helical Motion",
+    "difficulty": "Hard",
+    "question": "A particle of mass $m$ and charge $+q$ is projected with velocity $\\vec{v} = v_0 \\cos\\theta\\hat{i} + v_0 \\sin\\theta\\hat{j}$ into a uniform magnetic field $\\vec{B} = B_0 \\hat{i}$. Find the radius of the helix, pitch of trajectory, and magnetic force vector.",
+    "solution": "1. Parallel component $v_\\parallel = v_0\\cos\\theta$ causes linear motion along x-axis with pitch $p = v_\\parallel T = (v_0\\cos\\theta)\\left(\\frac{2\\pi m}{qB_0}\\right)$.\n2. Perpendicular component $v_\\perp = v_0\\sin\\theta$ generates circular motion with radius $R = \\frac{m v_0\\sin\\theta}{qB_0}$.\n3. Lorentz force: $\\vec{F} = q(\\vec{v}\\times\\vec{B}) = -q v_0 B_0 \\sin\\theta \\hat{k}$.",
+    "visual_tags": [
+      "helical_path",
+      "velocity_components",
+      "magnetic_force_vector"
+    ]
+  },
+  {
+    "id": "PHY-2023-MAIN-JAN-08",
+    "exam": "JEE Main 2023",
+    "topic": "Electrostatics & Electric Dipole",
+    "difficulty": "Medium",
+    "question": "An electric dipole of moment $\\vec{p} = p_0\\hat{i}$ is placed at the origin in an electric field $\\vec{E} = E_0(x\\hat{i} + y\\hat{j})$. Compute the net electrostatic force and torque acting on the dipole.",
+    "solution": "1. Torque: $\\vec{\\tau} = \\vec{p} \\times \\vec{E}(0) = (p_0\\hat{i}) \\times (0) = 0$.\n2. Force in non-uniform field: $\\vec{F} = (\\vec{p} \\cdot \\nabla)\\vec{E} = p_0 \\frac{\\partial}{\\partial x}(E_0 x \\hat{i} + E_0 y \\hat{j}) = p_0 E_0 \\hat{i}$.",
+    "visual_tags": [
+      "dipole_vector",
+      "electric_field_grid"
+    ]
+  }
+]

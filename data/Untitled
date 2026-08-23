@@ -1,0 +1,20 @@
+[
+  {
+    "id": "CHEM-2023-ADV-01",
+    "exam": "JEE Advanced 2023",
+    "topic": "Chemical Bonding & VSEPR",
+    "difficulty": "Medium",
+    "question": "Discuss the molecular geometry, hybridization, and bond angle deviations in $PCl_5$ (Phosphorus Pentachloride) in gaseous phase vs solid state.",
+    "solution": "1. Gaseous $PCl_5$: $sp^3d$ hybridization with Trigonal Bipyramidal geometry. 3 Equatorial P-Cl bonds ($120^\\circ$, $202\\text{ pm}$) and 2 Axial P-Cl bonds ($180^\\circ$ to each other, $240\\text{ pm}$, longer due to repulsion).\n2. Solid state: Exists as an ionic solid $[PCl_4]^+[PCl_6]^-$ with tetrahedral and octahedral geometries respectively.",
+    "visual_tags": ["trigonal_bipyramidal", "axial_equatorial_bonds", "chlorine_spheres"]
+  },
+  {
+    "id": "CHEM-2022-MAIN-02",
+    "exam": "JEE Main 2022",
+    "topic": "Organic Chemistry - $S_N2$ Reaction",
+    "difficulty": "Hard",
+    "question": "Explain the stereochemical outcome and reaction coordinate of $S_N2$ backside attack of $OH^-$ on $(R)\\text{-2-bromobutane}$.",
+    "solution": "1. Nucleophile $OH^-$ attacks the carbon from $180^\\circ$ opposite to the leaving group $Br^-$.\n2. Forms a pentacoordinated transition state with planar $sp^2$ carbon.\n3. Yields $(S)\\text{-butan-2-ol}$ with $100\\%$ Walden inversion (umbrella inversion).",
+    "visual_tags": ["backside_attack_arrow", "tetrahedral_inversion", "transition_state"]
+  }
+]

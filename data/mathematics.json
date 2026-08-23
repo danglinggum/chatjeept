@@ -1,0 +1,28 @@
+[
+  {
+    "id": "MATH-2023-ADV-P1-05",
+    "exam": "JEE Advanced 2023",
+    "topic": "3D Planes & Vector Normal Geometry",
+    "difficulty": "Hard",
+    "question": "Find the vector equation of the plane passing through the line of intersection of planes $P_1: \\vec{r}\\cdot(\\hat{i}+\\hat{j}+\\hat{k}) = 1$ and $P_2: \\vec{r}\\cdot(2\\hat{i}+3\\hat{j}-\\hat{k}) = -4$, perpendicular to $P_3: \\vec{r}\\cdot(\\hat{i}-\\hat{j}+\\hat{k}) = 0$.",
+    "solution": "1. Equation of family of planes: $\\vec{r} \\cdot [(\\hat{i}+\\hat{j}+\\hat{k}) + \\lambda(2\\hat{i}+3\\hat{j}-\\hat{k})] = 1 - 4\\lambda$.\n2. Normal vector $\\vec{n} = (1+2\\lambda)\\hat{i} + (1+3\\lambda)\\hat{j} + (1-\\lambda)\\hat{k}$.\n3. Perpendicularity with $P_3$: $\\vec{n} \\cdot (\\hat{i}-\\hat{j}+\\hat{k}) = 0 \\implies (1+2\\lambda) - (1+3\\lambda) + (1-\\lambda) = 0$.\n4. Yields $\\lambda = 0.5$. Substituting gives the plane: $4x + 5y + z + 2 = 0$.",
+    "visual_tags": [
+      "plane_grid",
+      "normal_vector_arrow",
+      "intersection_line"
+    ]
+  },
+  {
+    "id": "MATH-2022-ADV-P2-02",
+    "exam": "JEE Advanced 2022",
+    "topic": "Shortest Distance Between Skew Lines",
+    "difficulty": "Hard",
+    "question": "Find the shortest distance between skew lines $L_1: \\vec{r} = (\\hat{i}+2\\hat{j}+3\\hat{k}) + t(2\\hat{i}+3\\hat{j}+4\\hat{k})$ and $L_2: \\vec{r} = (2\\hat{i}+4\\hat{j}+5\\hat{k}) + s(3\\hat{i}+4\\hat{j}+5\\hat{k})$.",
+    "solution": "1. $\\vec{a}_1 = (1,2,3), \\vec{b}_1 = (2,3,4)$, $\\vec{a}_2 = (2,4,5), \\vec{b}_2 = (3,4,5)$.\n2. $\\vec{b}_1 \\times \\vec{b}_2 = -\\hat{i} + 2\\hat{j} - \\hat{k}$. Magnitude $|\\vec{b}_1 \\times \\vec{b}_2| = \\sqrt{1+4+1} = \\sqrt{6}$.\n3. $\\vec{a}_2 - \\vec{a}_1 = \\hat{i} + 2\\hat{j} + 2\\hat{k}$.\n4. Shortest Distance: $d = \\frac{|(\\vec{a}_2 - \\vec{a}_1) \\cdot (\\vec{b}_1 \\times \\vec{b}_2)|}{|\\vec{b}_1 \\times \\vec{b}_2|} = \\frac{|-1 + 4 - 2|}{\\sqrt{6}} = \\frac{1}{\\sqrt{6}}$.",
+    "visual_tags": [
+      "skew_lines",
+      "shortest_distance_segment",
+      "cross_product_vector"
+    ]
+  }
+]

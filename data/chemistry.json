@@ -1,0 +1,66 @@
+[
+  {
+    "id": "CHEM-2023-ADV-01",
+    "exam": "JEE Advanced 2023",
+    "topic": "Chemical Bonding & VSEPR",
+    "difficulty": "Medium",
+    "question": "Discuss the molecular geometry, hybridization, and bond angle deviations in $PCl_5$ (Phosphorus Pentachloride) in gaseous phase vs solid state.",
+    "solution": "1. Gaseous $PCl_5$: $sp^3d$ hybridization with Trigonal Bipyramidal geometry. 3 Equatorial P-Cl bonds ($120^\\circ$, $202\\text{ pm}$) and 2 Axial P-Cl bonds ($180^\\circ$ to each other, $240\\text{ pm}$, longer due to repulsion).\n2. Solid state: Exists as an ionic solid $[PCl_4]^+[PCl_6]^-$ with tetrahedral and octahedral geometries respectively.",
+    "visual_tags": [
+      "trigonal_bipyramidal",
+      "axial_equatorial_bonds",
+      "chlorine_spheres"
+    ]
+  },
+  {
+    "id": "CHEM-2022-MAIN-02",
+    "exam": "JEE Main 2022",
+    "topic": "Organic Chemistry - $S_N2$ Reaction",
+    "difficulty": "Hard",
+    "question": "Explain the stereochemical outcome and reaction coordinate of $S_N2$ backside attack of $OH^-$ on $(R)\\text{-2-bromobutane}$.",
+    "solution": "1. Nucleophile $OH^-$ attacks the carbon from $180^\\circ$ opposite to the leaving group $Br^-$.\n2. Forms a pentacoordinated transition state with planar $sp^2$ carbon.\n3. Yields $(S)\\text{-butan-2-ol}$ with $100\\%$ Walden inversion (umbrella inversion).",
+    "visual_tags": [
+      "backside_attack_arrow",
+      "tetrahedral_inversion",
+      "transition_state"
+    ]
+  },
+  {
+    "id": "CHEM-2023-ADV-P1-03",
+    "exam": "JEE Advanced 2023",
+    "topic": "VSEPR Theory & Trigonal Bipyramidal Geometry",
+    "difficulty": "Medium",
+    "question": "Explain the difference in bond lengths and reactivities of axial vs equatorial bonds in $PCl_5$ gas using VSEPR theory and hybridization.",
+    "solution": "1. Hybridization: $sp^3d$ utilizing $s, p_x, p_y, p_z, d_{z^2}$ orbitals.\n2. Three equatorial bonds form $120^\\circ$ angles (bond length $\\approx 202\\text{ pm}$).\n3. Two axial bonds form $90^\\circ$ angles with 3 equatorial bonds each, experiencing stronger repulsion and thus longer bonds ($\\approx 240\\text{ pm}$).\n4. Axial bonds are weaker and cleaved first upon heating: $PCl_5(g) \\xrightarrow{\\Delta} PCl_3(g) + Cl_2(g)$.",
+    "visual_tags": [
+      "trigonal_bipyramidal",
+      "axial_equatorial_spheres",
+      "bonds"
+    ]
+  },
+  {
+    "id": "CHEM-2022-ADV-P2-09",
+    "exam": "JEE Advanced 2022",
+    "topic": "Organic Stereochemistry & Walden Inversion",
+    "difficulty": "Hard",
+    "question": "Describe the transition state geometry, hybridization change, and stereochemical outcome during the $S_N2$ substitution of $(2R)\\text{-2-bromobutane}$ with methoxide ion.",
+    "solution": "1. Backside attack: Methoxide ion attacks from $180^\\circ$ opposite to $C-Br$ bond.\n2. Transition State: Central carbon transitions from $sp^3$ to a planar $sp^2$-like arrangement with partial bonds to $OCH_3$ and $Br$.\n3. Outcome: $100\\%$ stereochemical inversion (Walden inversion), producing $(2S)\\text{-2-methoxybutane}$.",
+    "visual_tags": [
+      "walden_inversion",
+      "transition_state_arrows",
+      "tetrahedral_flip"
+    ]
+  },
+  {
+    "id": "CHEM-2023-MAIN-APR-11",
+    "exam": "JEE Main 2023",
+    "topic": "Coordination Chemistry & Crystal Field Theory",
+    "difficulty": "Medium",
+    "question": "Calculate the Crystal Field Stabilization Energy (CFSE) and magnetic moment for $[Fe(CN)_6]^{4-}$ vs $[Fe(H_2O)_6]^{2+}$.",
+    "solution": "1. $Fe^{2+}$ has $3d^6$ configuration.\n2. With strong field ligand $CN^-$: Low spin $t_{2g}^6 e_g^0$. CFSE $= -0.4\\Delta_o \\times 6 + 2P = -2.4\\Delta_o + 2P$, Diamagnetic ($\\mu = 0\\text{ BM}$).\n3. With weak field ligand $H_2O$: High spin $t_{2g}^4 e_g^2$. CFSE $= (-0.4\\times 4 + 0.6\\times 2)\\Delta_o = -0.4\\Delta_o$, Paramagnetic ($\\mu = \\sqrt{4(4+2)} = 4.90\\text{ BM}$).",
+    "visual_tags": [
+      "octahedral_splitting",
+      "electron_spin_arrows"
+    ]
+  }
+]
