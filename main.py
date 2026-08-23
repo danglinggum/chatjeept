@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -18,12 +18,10 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from rag import retrieve_relevant_jee_context
-
 load_dotenv()
 
 # =============================================================================
-# Security & Auth Settings
+# Security & Rate Limiting
 # =============================================================================
 
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "jeept2026")
@@ -47,7 +45,7 @@ def verify_admin_key(x_admin_key: str | None = Header(default=None)):
         raise HTTPException(status_code=403, detail="Unauthorized: Invalid Admin Secret Key")
 
 # =============================================================================
-# AI Client & Stable Models
+# AI Client
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -108,7 +106,7 @@ def log_user_query(ip_address: str, subject: str, tutor: str, mode: str, questio
         print(f"[Logging Error] {e}")
 
 # =============================================================================
-# Tutor Config & Pydantic Models
+# Models
 # =============================================================================
 
 Subject = Literal["Physics", "Chemistry", "Mathematics"]
@@ -184,7 +182,7 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list, max_length=40)
 
 # =============================================================================
-# FastAPI Setup
+# FastAPI Setup & CORS
 # =============================================================================
 
 app = FastAPI(title="ChatJEEPT API", version="3.5.0")
@@ -192,7 +190,6 @@ app = FastAPI(title="ChatJEEPT API", version="3.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -227,6 +224,7 @@ Then output on its own line:
 def build_prompt(request: ChatRequest) -> str:
     tutor = TUTOR_CONFIG[request.subject]
     try:
+        from rag import retrieve_relevant_jee_context
         rag_context = retrieve_relevant_jee_context(request.message, request.subject, top_k=2)
     except Exception:
         rag_context = "No archival reference available."
@@ -338,10 +336,6 @@ async def chat(request: ChatRequest, req: Request) -> TutorResponse:
             continue
 
     raise HTTPException(status_code=500, detail=f"AI generation failed: {str(last_error)}")
-
-# =============================================================================
-# Admin Endpoints (실시간 통계 & 로그 조회)
-# =============================================================================
 
 @app.get("/api/admin/stats", dependencies=[Depends(verify_admin_key)])
 async def get_admin_stats():
