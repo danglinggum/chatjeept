@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 load_dotenv()
 
 # =============================================================================
-# Security: Rate Limiting
+# Security & Rate Limiting
 # =============================================================================
 
 REQUEST_RECORDS = defaultdict(list)
@@ -33,7 +33,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client (Fast & Smart)
+# Google GenAI Client
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -109,12 +109,11 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
 
 # =============================================================================
-# FastAPI Core App & Strict CORS Policy
+# FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="6.5.0")
+app = FastAPI(title="ChatJEEPT API", version="7.0.0")
 
-# 내 공식 프론트엔드 도메인과 로컬 개발 환경만 허용하여 무단 API 도용 방지
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
     "http://localhost:3000",
@@ -131,23 +130,27 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Provide direct, mathematically rigorous step-by-step explanations without conversational fluff. Use LaTeX ($...$ for inline, $$...$$ for block formulas).
+Provide deep, rigorous step-by-step explanations.
 
-CRITICAL 3D VISUALIZATION DIRECTIVE:
-Whenever the question involves molecules, geometry, vectors, force balance, coordinate planes, magnetic/electric fields, or 3D rotations, YOU MUST ALWAYS GENERATE A 3D SCENE JSON.
+CRITICAL FORMATTING RULES:
+1. ALWAYS wrap inline math/chemical formulas with single dollar signs `$ ... $` (e.g., `$\\text{SF}_6$`, `$sp^3d^2$`, `$90^\\circ$`).
+2. ALWAYS wrap block formulas with double dollar signs `$$ ... $$`.
+3. NEVER leave raw LaTeX commands like `\\text{}` outside of dollar signs.
 
-3D Scene Element Types:
-1. Sphere (Atoms, charges, masses):
-   {"kind": "sphere", "position": [x, y, z], "radius": 0.35, "color": "#38bdf8", "label": "Atom"}
-2. Cylinder (Bonds, rods, axes):
-   {"kind": "cylinder", "start": [x1, y1, z1], "end": [x2, y2, z2], "color": "#94a3b8"}
-3. Arrow (Forces, velocity, fields):
-   {"kind": "arrow", "start": [x1, y1, z1], "end": [x2, y2, z2], "color": "#f97316", "label": "Force Vector"}
+CRITICAL 3D VISUALIZATION RULE:
+For ANY question involving molecular shapes, geometry, vectors, forces, orbitals, or 3D planes, YOU MUST ALWAYS INCLUDE A 3D SCENE AT THE END.
 
-DELIMITER RULE:
-Always write the explanation text first, then on a new line write:
+Delimiter structure:
+[Your thorough explanation here]
+
 <<<3D_SCENE>>>
-followed by valid JSON or null, then on a new line write:
+{
+  "elements": [
+    {"kind": "sphere", "position": [0, 0, 0], "radius": 0.4, "color": "#f59e0b", "label": "Center"},
+    {"kind": "sphere", "position": [0, 1.5, 0], "radius": 0.3, "color": "#10b981", "label": "Ligand"},
+    {"kind": "cylinder", "start": [0, 0, 0], "end": [0, 1.5, 0], "color": "#cbd5e1"}
+  ]
+}
 <<<END_3D_SCENE>>>
 """.strip()
 
@@ -177,7 +180,8 @@ def extract_explanation_and_scene(raw_text: str) -> tuple[str, Scene | None]:
     if isinstance(parsed, dict) and "elements" in parsed:
         try:
             valid_elements = [scene_element_adapter.validate_python(el) for el in parsed["elements"]]
-            scene = Scene(elements=valid_elements)
+            if len(valid_elements) > 0:
+                scene = Scene(elements=valid_elements)
         except Exception:
             scene = None
     return explanation, scene
@@ -188,15 +192,15 @@ def generate_ai(model_name: str, prompt: str):
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.1,  # 방황 없이 직결 응답
-            max_output_tokens=1500,  # 연산량 압축으로 응답 속도 극대화
+            temperature=0.2,
+            max_output_tokens=3500,  # 잘림 방지를 위해 넉넉한 토큰 할당
         ),
     )
 
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v6.5"}
+    return {"status": "online", "service": "ChatJEEPT API v7.0"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
@@ -210,8 +214,7 @@ async def chat_endpoint(request: ChatRequest, req: Request):
     check_rate_limit(client_ip)
 
     tutor = TUTOR_CONFIG[request.subject]
-    # 최근 2턴만 문맥으로 압축 전송하여 분석 속도 단축
-    history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-2:]]
+    history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-3:]]
     prompt = f"Subject: {request.subject}\nMode: {request.mode}\nHistory: {json.dumps(history_ctx)}\nQuestion: {request.message}"
 
     last_err = None

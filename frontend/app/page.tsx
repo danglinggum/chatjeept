@@ -52,27 +52,35 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
-// AI가 수식 기호($)를 빠뜨렸을 때 자동 복구해주는 전처리기
-function autoFixLatex(text: string): string {
+// 모든 변종 LaTeX 문법(\( \), \[, unescaped \text)을 표준 $...$ 로 정규화
+function normalizeMath(text: string): string {
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
-  clean = clean.replace(/(?<!\$)\\text\{[^\}]+\}(?:_[0-9a-zA-Z]+)?(?!\$)/g, (m) => `$${m}$`);
-  clean = clean.replace(/(?<!\$)(\bsp\^[0-9a-zA-Z\^]+)(?!\$)/gi, (m) => `$${m}$`);
+  // \[ ... \] -> $$ ... $$
+  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$$${math}$$`);
+  // \( ... \) -> $ ... $
+  clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math}$`);
+  // $ 없이 노출된 \text{...} 수식 감싸기
+  clean = clean.replace(/(?<!\$)\\text\{[^\}]+\}(?:_[0-9a-zA-Z\^\{\}]+)?(?!\$)/g, (m) => `$${m}$`);
+  // $ 없이 노출된 sp^3, 90^\circ 감싸기
+  clean = clean.replace(/(?<!\$)\b(sp\^[0-9a-zA-Z\^\{\}]+)(?!\$)/gi, (m) => `$${m}$`);
   clean = clean.replace(/(?<!\$)([0-9]+\^\\circ)(?!\$)/g, (m) => `$${m}$`);
   return clean;
 }
 
 function SceneRenderer({ scene }: { scene: Scene }) {
+  if (!scene || !scene.elements || scene.elements.length === 0) return null;
+
   return (
-    <div className="w-full h-72 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
-      <div className="absolute top-3 left-3 z-10 bg-slate-900/80 border border-slate-700/60 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300">
-        🎮 Interactive 3D Viewport (Drag to Rotate / Scroll to Zoom)
+    <div className="w-full h-80 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
+      <div className="absolute top-3 left-3 z-10 bg-slate-900/90 border border-slate-700/80 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300 shadow">
+        🎮 Interactive 3D Model (Drag to Rotate / Scroll to Zoom)
       </div>
       <ThreeCanvas camera={{ position: [0, 2, 6], fov: 50 }}>
-        <ambientLight intensity={1.2} />
+        <ambientLight intensity={1.5} />
         <pointLight position={[10, 10, 10]} intensity={1.5} />
         <directionalLight position={[-5, 5, 5]} intensity={0.8} />
         <OrbitControls makeDefault />
-        <gridHelper args={[10, 10, "#334155", "#1e293b"]} position={[0, -1, 0]} />
+        <gridHelper args={[10, 10, "#334155", "#1e293b"]} position={[0, -1.2, 0]} />
 
         {scene.elements.map((el, idx) => {
           if (el.kind === "sphere" && el.position) {
@@ -91,7 +99,7 @@ function SceneRenderer({ scene }: { scene: Scene }) {
             ];
             return (
               <mesh key={idx} position={mid}>
-                <cylinderGeometry args={[0.08, 0.08, 1.5, 16]} />
+                <cylinderGeometry args={[0.07, 0.07, 1.4, 16]} />
                 <meshStandardMaterial color={el.color || "#94a3b8"} roughness={0.4} />
               </mesh>
             );
@@ -288,7 +296,7 @@ export default function ChatJEEPTPage() {
             className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"} space-y-2`}
           >
             <div
-              className={`max-w-[85%] rounded-3xl p-5 ${
+              className={`max-w-[88%] rounded-3xl p-5 ${
                 msg.role === "user"
                   ? "bg-cyan-500 text-slate-950 font-medium rounded-br-none shadow-lg shadow-cyan-500/20"
                   : "bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none shadow-xl"
@@ -309,11 +317,11 @@ export default function ChatJEEPTPage() {
                     rehypePlugins={[rehypeKatex]}
                     components={{
                       table: ({ ...props }) => (
-                        <div className="overflow-x-auto my-4 rounded-xl border border-slate-800 bg-slate-950/70 shadow-md">
+                        <div className="overflow-x-auto my-4 rounded-xl border border-slate-800 bg-slate-950/80 shadow-md">
                           <table className="w-full text-left text-xs text-slate-200 divide-y divide-slate-800" {...props} />
                         </div>
                       ),
-                      thead: ({ ...props }) => <thead className="bg-slate-800/80 font-bold text-cyan-400" {...props} />,
+                      thead: ({ ...props }) => <thead className="bg-slate-800/90 font-bold text-cyan-400" {...props} />,
                       th: ({ ...props }) => <th className="px-4 py-2.5 font-bold border-b border-slate-700" {...props} />,
                       td: ({ ...props }) => <td className="px-4 py-2 border-b border-slate-800/60 font-mono text-slate-300" {...props} />,
                       h1: ({ ...props }) => <h1 className="text-lg font-black text-cyan-400 mt-4 mb-2" {...props} />,
@@ -324,7 +332,7 @@ export default function ChatJEEPTPage() {
                       hr: ({ ...props }) => <hr className="my-4 border-slate-800" {...props} />,
                     }}
                   >
-                    {autoFixLatex(msg.content)}
+                    {normalizeMath(msg.content)}
                   </ReactMarkdown>
                 </div>
               )}
