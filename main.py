@@ -4,15 +4,12 @@ import json
 import os
 import re
 import time
-import sqlite3
 import asyncio
-from datetime import datetime
-from pathlib import Path
 from typing import Annotated, Any, Literal
 from collections import defaultdict
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
@@ -21,10 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 load_dotenv()
 
 # =============================================================================
-# Auth & Security
+# Security: Rate Limiting
 # =============================================================================
 
-ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "jeept2026")
 REQUEST_RECORDS = defaultdict(list)
 RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
@@ -37,7 +33,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client
+# Google GenAI Client (Fast & Smart)
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -46,52 +42,10 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-MODELS_TO_TRY = [
-    "gemini-3.6-flash",
-]
+MODELS_TO_TRY = ["gemini-3.6-flash"]
 
 # =============================================================================
-# SQLite Database
-# =============================================================================
-
-DB_FILE = Path(__file__).resolve().parent / "chat_logs.db"
-
-def init_db():
-    conn = sqlite3.connect(str(DB_FILE))
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS query_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            ip_address TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            tutor TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            question TEXT NOT NULL,
-            has_scene INTEGER DEFAULT 0
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-init_db()
-
-def log_user_query(ip_address: str, subject: str, tutor: str, mode: str, question: str, has_scene: bool):
-    try:
-        conn = sqlite3.connect(str(DB_FILE))
-        cursor = conn.cursor()
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute(
-            "INSERT INTO query_logs (timestamp, ip_address, subject, tutor, mode, question, has_scene) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (now_str, ip_address, subject, tutor, mode, question, 1 if has_scene else 0)
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"[Logging Error] {e}")
-
-# =============================================================================
-# Pydantic Models & Persona Config
+# Models & Configuration
 # =============================================================================
 
 Subject = Literal["Physics", "Chemistry", "Mathematics"]
@@ -155,55 +109,46 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
 
 # =============================================================================
-# FastAPI App
+# FastAPI Core App & Strict CORS Policy
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="5.1.0")
+app = FastAPI(title="ChatJEEPT API", version="6.5.0")
+
+# 내 공식 프론트엔드 도메인과 로컬 개발 환경만 허용하여 무단 API 도용 방지
+ALLOWED_ORIGINS = [
+    "https://chatjeept-iota.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Explain concepts step-by-step with deep mathematical/physical rigor using LaTeX ($...$ for inline, $$...$$ for block formulas).
+Provide direct, mathematically rigorous step-by-step explanations without conversational fluff. Use LaTeX ($...$ for inline, $$...$$ for block formulas).
 
 CRITICAL 3D VISUALIZATION DIRECTIVE:
 Whenever the question involves molecules, geometry, vectors, force balance, coordinate planes, magnetic/electric fields, or 3D rotations, YOU MUST ALWAYS GENERATE A 3D SCENE JSON.
 
 3D Scene Element Types:
-1. Sphere (Atoms, point charges, masses, vertices):
-   {"kind": "sphere", "position": [x, y, z], "radius": 0.35, "color": "#38bdf8", "label": "Atom/Mass"}
-2. Cylinder (Chemical bonds, coordinate axes, rigid rods):
+1. Sphere (Atoms, charges, masses):
+   {"kind": "sphere", "position": [x, y, z], "radius": 0.35, "color": "#38bdf8", "label": "Atom"}
+2. Cylinder (Bonds, rods, axes):
    {"kind": "cylinder", "start": [x1, y1, z1], "end": [x2, y2, z2], "color": "#94a3b8"}
-3. Arrow (Forces, velocities, field vectors, displacement):
+3. Arrow (Forces, velocity, fields):
    {"kind": "arrow", "start": [x1, y1, z1], "end": [x2, y2, z2], "color": "#f97316", "label": "Force Vector"}
 
-EXAMPLE - PCl5 Trigonal Bipyramidal Geometry:
-<<<3D_SCENE>>>
-{
-  "elements": [
-    {"kind": "sphere", "position": [0, 0, 0], "radius": 0.45, "color": "#f59e0b", "label": "P"},
-    {"kind": "sphere", "position": [0, 1.8, 0], "radius": 0.3, "color": "#10b981", "label": "Cl (Axial)"},
-    {"kind": "sphere", "position": [0, -1.8, 0], "radius": 0.3, "color": "#10b981", "label": "Cl (Axial)"},
-    {"kind": "sphere", "position": [1.5, 0, 0], "radius": 0.3, "color": "#10b981", "label": "Cl (Equatorial)"},
-    {"kind": "sphere", "position": [-0.75, 0, 1.3], "radius": 0.3, "color": "#10b981", "label": "Cl (Equatorial)"},
-    {"kind": "sphere", "position": [-0.75, 0, -1.3], "radius": 0.3, "color": "#10b981", "label": "Cl (Equatorial)"},
-    {"kind": "cylinder", "start": [0, 0, 0], "end": [0, 1.8, 0], "color": "#cbd5e1"},
-    {"kind": "cylinder", "start": [0, 0, 0], "end": [0, -1.8, 0], "color": "#cbd5e1"},
-    {"kind": "cylinder", "start": [0, 0, 0], "end": [1.5, 0, 0], "color": "#cbd5e1"},
-    {"kind": "cylinder", "start": [0, 0, 0], "end": [-0.75, 0, 1.3], "color": "#cbd5e1"},
-    {"kind": "cylinder", "start": [0, 0, 0], "end": [-0.75, 0, -1.3], "color": "#cbd5e1"}
-  ]
-}
-<<<END_3D_SCENE>>>
-
 DELIMITER RULE:
-Always write the text explanation first, then write <<<3D_SCENE>>>, then the JSON (or null only if purely abstract 1D text), then <<<END_3D_SCENE>>>.
+Always write the explanation text first, then on a new line write:
+<<<3D_SCENE>>>
+followed by valid JSON or null, then on a new line write:
+<<<END_3D_SCENE>>>
 """.strip()
 
 def parse_json_defensively(value: str) -> Any | None:
@@ -243,20 +188,30 @@ def generate_ai(model_name: str, prompt: str):
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.2,
-            max_output_tokens=3000,
+            temperature=0.1,  # 방황 없이 직결 응답
+            max_output_tokens=1500,  # 연산량 압축으로 응답 속도 극대화
         ),
     )
 
-async def process_chat(request: ChatRequest, req: Request) -> TutorResponse:
+@app.get("/")
+@app.get("/health")
+async def health():
+    return {"status": "online", "service": "ChatJEEPT API v6.5"}
+
+@app.post("/api/chat", response_model=TutorResponse)
+@app.post("/api/chat/", response_model=TutorResponse)
+@app.post("/chat", response_model=TutorResponse)
+@app.post("/chat/", response_model=TutorResponse)
+async def chat_endpoint(request: ChatRequest, req: Request):
     if not ai_client:
-        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY is not configured on Render.")
+        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY is not configured.")
     
     client_ip = req.headers.get("x-forwarded-for", req.client.host if req.client else "127.0.0.1").split(",")[0].strip()
     check_rate_limit(client_ip)
 
     tutor = TUTOR_CONFIG[request.subject]
-    history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-4:]]
+    # 최근 2턴만 문맥으로 압축 전송하여 분석 속도 단축
+    history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-2:]]
     prompt = f"Subject: {request.subject}\nMode: {request.mode}\nHistory: {json.dumps(history_ctx)}\nQuestion: {request.message}"
 
     last_err = None
@@ -266,57 +221,12 @@ async def process_chat(request: ChatRequest, req: Request) -> TutorResponse:
             raw = res.text or ""
             if raw.strip():
                 exp, sc = extract_explanation_and_scene(raw)
-                log_user_query(client_ip, request.subject, tutor["name"], request.mode, request.message, sc is not None)
                 return TutorResponse(explanation=exp, scene=sc, tutor=tutor["name"], subject=request.subject, mode=request.mode)
         except Exception as e:
             last_err = e
             continue
 
     raise HTTPException(status_code=500, detail=f"AI generation failed: {str(last_err)}")
-
-# Endpoints
-@app.get("/")
-@app.get("/health")
-async def health():
-    return {"status": "online", "service": "ChatJEEPT API v5.1"}
-
-@app.post("/api/chat", response_model=TutorResponse)
-@app.post("/api/chat/", response_model=TutorResponse)
-@app.post("/chat", response_model=TutorResponse)
-@app.post("/chat/", response_model=TutorResponse)
-async def chat_endpoint(request: ChatRequest, req: Request):
-    return await process_chat(request, req)
-
-@app.get("/api/admin/stats")
-@app.get("/admin/stats")
-async def get_stats(x_admin_key: str | None = Header(default=None)):
-    if x_admin_key != ADMIN_SECRET_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-    conn = sqlite3.connect(str(DB_FILE))
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM query_logs")
-    t = c.fetchone()[0]
-    c.execute("SELECT COUNT(DISTINCT ip_address) FROM query_logs")
-    u = c.fetchone()[0]
-    today = datetime.now().strftime("%Y-%m-%d")
-    c.execute("SELECT COUNT(*) FROM query_logs WHERE timestamp LIKE ?", (f"{today}%",))
-    td = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM query_logs WHERE has_scene = 1")
-    sc = c.fetchone()[0]
-    conn.close()
-    return {"total_queries": t, "unique_visitors": u, "today_queries": td, "scenes_generated": sc}
-
-@app.get("/api/admin/queries")
-@app.get("/admin/queries")
-async def get_queries(limit: int = 100, x_admin_key: str | None = Header(default=None)):
-    if x_admin_key != ADMIN_SECRET_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-    conn = sqlite3.connect(str(DB_FILE))
-    c = conn.cursor()
-    c.execute("SELECT id, timestamp, ip_address, subject, tutor, mode, question, has_scene FROM query_logs ORDER BY id DESC LIMIT ?", (limit,))
-    rows = c.fetchall()
-    conn.close()
-    return {"logs": [{"id": r[0], "timestamp": r[1], "ip_address": r[2], "subject": r[3], "tutor": r[4], "mode": r[5], "question": r[6], "has_scene": bool(r[7])} for r in rows]}
 
 if __name__ == "__main__":
     import uvicorn
