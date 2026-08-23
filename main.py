@@ -20,6 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 load_dotenv()
 
+# =============================================================================
+# Security & Rate Limiting
+# =============================================================================
+
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "jeept2026")
 
 REQUEST_RECORDS = defaultdict(list)
@@ -40,6 +44,10 @@ def verify_admin_key(x_admin_key: str | None = Header(default=None)):
     if not x_admin_key or x_admin_key != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=403, detail="Unauthorized: Invalid Admin Secret Key")
 
+# =============================================================================
+# AI Client Configuration
+# =============================================================================
+
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
 SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 
@@ -52,8 +60,11 @@ ai_client = genai.Client(api_key=GOOGLE_API_KEY)
 MODELS_TO_TRY = [
     "gemini-2.0-flash",
     "gemini-1.5-flash",
-    "gemini-1.5-pro",
 ]
+
+# =============================================================================
+# SQLite Analytics & Query Logging
+# =============================================================================
 
 DB_FILE = Path(__file__).resolve().parent / "chat_logs.db"
 
@@ -93,6 +104,10 @@ def log_user_query(ip_address: str, subject: str, tutor: str, mode: str, questio
         conn.close()
     except Exception as e:
         print(f"[Logging Error] {e}")
+
+# =============================================================================
+# Tutor Schema & Models
+# =============================================================================
 
 Subject = Literal["Physics", "Chemistry", "Mathematics"]
 TutorMode = Literal["Socratic Hint", "Full Solution"]
@@ -166,11 +181,16 @@ class ChatRequest(BaseModel):
     mode: TutorMode = "Socratic Hint"
     history: list[ChatMessage] = Field(default_factory=list, max_length=40)
 
-app = FastAPI(title="ChatJEEPT API", version="3.6.0")
+# =============================================================================
+# FastAPI Core App
+# =============================================================================
+
+app = FastAPI(title="ChatJEEPT API", version="3.7.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -180,9 +200,8 @@ You are one of the elite ChatJEEPT IIT-JEE Master Tutors.
 
 GENERAL TEACHING RULES:
 1. Remain strictly faithful to the active tutor persona (Rahul for Physics, Raj for Chemistry, Amit for Mathematics).
-2. Utilize the provided 'RETRIEVED JEE ARCHIVAL REFERENCES' to model your analytical rigor, typical IIT traps, and exam-standard formulations.
-3. Write the explanation in clear English using standard LaTeX ($...$ for inline, $$...$$ for display).
-4. Never wrap the explanation in quotation marks or JSON.
+2. Write the explanation in clear English using standard LaTeX ($...$ for inline, $$...$$ for display).
+3. Never wrap the explanation in quotation marks or JSON.
 
 REQUIRED OUTPUT FORMAT:
 First write the complete explanation.
@@ -204,13 +223,6 @@ Then output on its own line:
 
 def build_prompt(request: ChatRequest) -> str:
     tutor = TUTOR_CONFIG[request.subject]
-    rag_context = "Archival reference active."
-    try:
-        from rag import retrieve_relevant_jee_context
-        rag_context = retrieve_relevant_jee_context(request.message, request.subject, top_k=2)
-    except Exception:
-        pass
-
     history_payload = [{"role": item.role, "content": item.content} for item in request.history[-6:]]
     history_text = json.dumps(history_payload, ensure_ascii=False, indent=2)
 
@@ -218,9 +230,6 @@ def build_prompt(request: ChatRequest) -> str:
 ACTIVE TUTOR: Master {tutor["name"]} ({tutor["institution"]})
 SUBJECT: {request.subject}
 MODE: {request.mode}
-
-RETRIEVED JEE ARCHIVAL REFERENCES:
-{rag_context}
 
 CONVERSATION HISTORY:
 {history_text}
@@ -267,7 +276,7 @@ def extract_explanation_and_scene(raw_response: str) -> tuple[str, Scene | None]
 
 @app.get("/")
 async def root():
-    return {"status": "online", "service": "ChatJEEPT API", "timestamp": datetime.now().isoformat()}
+    return {"status": "online", "service": "ChatJEEPT API", "endpoints": ["/api/chat", "/chat", "/api/admin/stats"]}
 
 def generate_ai_content_sync(model_name: str, prompt: str):
     return ai_client.models.generate_content(
@@ -280,8 +289,7 @@ def generate_ai_content_sync(model_name: str, prompt: str):
         ),
     )
 
-@app.post("/api/chat", response_model=TutorResponse)
-async def chat(request: ChatRequest, req: Request) -> TutorResponse:
+async def handle_chat_core(request: ChatRequest, req: Request) -> TutorResponse:
     client_ip = req.headers.get("x-forwarded-for", req.client.host if req.client else "127.0.0.1").split(",")[0].strip()
     check_rate_limit(client_ip)
 
@@ -314,30 +322,36 @@ async def chat(request: ChatRequest, req: Request) -> TutorResponse:
                 )
         except Exception as exc:
             last_error = exc
-            print(f"[Model Fallback] {model_name} error: {exc}")
+            print(f"[Fallback Error] {model_name}: {exc}")
             continue
 
     raise HTTPException(status_code=500, detail=f"AI generation failed: {str(last_error)}")
 
-@app.get("/api/admin/stats", dependencies=[Depends(verify_admin_key)])
-async def get_admin_stats():
+@app.post("/api/chat", response_model=TutorResponse)
+async def chat_api(request: ChatRequest, req: Request):
+    return await handle_chat_core(request, req)
+
+@app.post("/chat", response_model=TutorResponse)
+async def chat_direct(request: ChatRequest, req: Request):
+    return await handle_chat_core(request, req)
+
+# =============================================================================
+# Admin Endpoints (Dual Path Support)
+# =============================================================================
+
+async def handle_stats_core():
     init_db()
     conn = sqlite3.connect(str(DB_FILE))
     cursor = conn.cursor()
-
     cursor.execute("SELECT COUNT(*) FROM query_logs")
     total_queries = cursor.fetchone()[0]
-
     cursor.execute("SELECT COUNT(DISTINCT ip_address) FROM query_logs")
     unique_visitors = cursor.fetchone()[0]
-
     today_str = datetime.now().strftime("%Y-%m-%d")
     cursor.execute("SELECT COUNT(*) FROM query_logs WHERE timestamp LIKE ?", (f"{today_str}%",))
     today_queries = cursor.fetchone()[0]
-
     cursor.execute("SELECT COUNT(*) FROM query_logs WHERE has_scene = 1")
     scenes_generated = cursor.fetchone()[0]
-
     conn.close()
 
     return {
@@ -347,8 +361,15 @@ async def get_admin_stats():
         "scenes_generated": scenes_generated,
     }
 
-@app.get("/api/admin/queries", dependencies=[Depends(verify_admin_key)])
-async def get_admin_queries(limit: int = 100):
+@app.get("/api/admin/stats", dependencies=[Depends(verify_admin_key)])
+async def get_admin_stats():
+    return await handle_stats_core()
+
+@app.get("/admin/stats", dependencies=[Depends(verify_admin_key)])
+async def get_admin_stats_alt():
+    return await handle_stats_core()
+
+async def handle_queries_core(limit: int = 100):
     init_db()
     conn = sqlite3.connect(str(DB_FILE))
     cursor = conn.cursor()
@@ -373,10 +394,18 @@ async def get_admin_queries(limit: int = 100):
             "question": r[6],
             "has_scene": bool(r[7]),
         })
-
     return {"logs": logs}
 
+@app.get("/api/admin/queries", dependencies=[Depends(verify_admin_key)])
+async def get_admin_queries(limit: int = 100):
+    return await handle_queries_core(limit)
+
+@app.get("/admin/queries", dependencies=[Depends(verify_admin_key)])
+async def get_admin_queries_alt(limit: int = 100):
+    return await handle_queries_core(limit)
+
 @app.post("/api/admin/seed-test-log", dependencies=[Depends(verify_admin_key)])
+@app.post("/admin/seed-test-log", dependencies=[Depends(verify_admin_key)])
 async def seed_test_log():
     log_user_query("127.0.0.1", "Physics", "Rahul", "Socratic Hint", "What is pure rolling condition on rough incline?", True)
     log_user_query("127.0.0.1", "Chemistry", "Raj", "Full Solution", "Explain PCl5 trigonal bipyramidal bond angles", True)
