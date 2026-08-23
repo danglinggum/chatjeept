@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import Link from "next/link";
 import dynamic from "next/dynamic";
 
 const ThreeCanvas = dynamic(() => import("@react-three/fiber").then((mod) => mod.Canvas), { ssr: false });
@@ -37,13 +36,10 @@ const TUTOR_INFO: Record<Subject, { name: string; institute: string; spec: strin
   Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors" },
 };
 
-// 어떤 잘못된 환경 변수가 들어와도 순수 백엔드 도메인만 추출하는 함수
 function resolveBackendUrl(): string {
   let raw = process.env.NEXT_PUBLIC_API_URL || "https://chatjeept.onrender.com";
-  // 마크다운 문법 제거: [text](http...) -> http...
   const mdMatch = raw.match(/\((https?:\/\/[^\)]+)\)/);
   if (mdMatch) raw = mdMatch[1];
-  // 따옴표 및 대괄호 제거
   raw = raw.replace(/["'\[\]]/g, "").trim().replace(/\/+$/, "");
   if (!raw.startsWith("http")) return "https://chatjeept.onrender.com";
   return raw;
@@ -51,9 +47,70 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
+// LaTeX 수식 및 마크다운 포맷팅 렌더러
+function FormattedMessage({ content }: { content: string }) {
+  const cleanText = content.split("<<<3D_SCENE>>>")[0].trim();
+  const blocks = cleanText.split(/(\$\$[\s\S]*?\$\$)/g);
+
+  return (
+    <div className="space-y-3 leading-relaxed text-sm text-slate-200 font-sans">
+      {blocks.map((block, idx) => {
+        if (block.startsWith("$$") && block.endsWith("$$")) {
+          const math = block.slice(2, -2).trim();
+          return (
+            <div
+              key={idx}
+              className="my-3 p-3.5 bg-slate-950/90 border border-cyan-800/40 rounded-2xl text-center font-mono text-cyan-300 text-sm overflow-x-auto shadow-inner"
+            >
+              {math}
+            </div>
+          );
+        }
+
+        return (
+          <div key={idx} className="space-y-2">
+            {block.split("\n").map((line, lIdx) => {
+              if (!line.trim()) return <div key={lIdx} className="h-1" />;
+              return (
+                <div key={lIdx} className="leading-relaxed">
+                  {renderInline(line)}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderInline(text: string) {
+  const parts = text.split(/(\$[^\$\n]+\$|\*\*[^\*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
+      return (
+        <span
+          key={i}
+          className="font-mono text-cyan-300 bg-slate-800/90 px-1.5 py-0.5 rounded text-[13px] mx-0.5 border border-cyan-900/40 font-semibold"
+        >
+          {part.slice(1, -1)}
+        </span>
+      );
+    }
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return (
+        <strong key={i} className="font-bold text-white tracking-wide">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return part;
+  });
+}
+
 function SceneRenderer({ scene }: { scene: Scene }) {
   return (
-    <div className="w-full h-72 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-3">
+    <div className="w-full h-72 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
       <div className="absolute top-3 left-3 z-10 bg-slate-900/80 border border-slate-700/60 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300">
         🎮 Interactive 3D Viewport (Drag to Rotate / Scroll to Zoom)
       </div>
@@ -167,10 +224,10 @@ export default function ChatJEEPTPage() {
       });
 
       if (!res.ok) {
-        let errDetail = `HTTP ${res.status} (요청주소: ${requestUrl})`;
+        let errDetail = `HTTP ${res.status}`;
         try {
           const errData = await res.json();
-          if (errData.detail) errDetail = `${errData.detail} (HTTP ${res.status})`;
+          if (errData.detail) errDetail = errData.detail;
         } catch (_) {}
         throw new Error(errDetail);
       }
@@ -247,13 +304,6 @@ export default function ChatJEEPTPage() {
               Full Solution
             </button>
           </div>
-
-          <Link
-            href="/admin"
-            className="text-xs text-slate-400 hover:text-cyan-300 border border-slate-800 hover:border-cyan-800 px-3 py-1.5 rounded-xl transition bg-slate-900"
-          >
-            📊 관리자 콘솔
-          </Link>
         </div>
       </header>
 
@@ -296,7 +346,12 @@ export default function ChatJEEPTPage() {
                   🎓 Master {msg.tutor || activeTutor.name}
                 </div>
               )}
-              <div className="text-sm whitespace-pre-wrap leading-relaxed font-sans">{msg.content}</div>
+
+              {msg.role === "user" ? (
+                <div className="text-sm font-sans">{msg.content}</div>
+              ) : (
+                <FormattedMessage content={msg.content} />
+              )}
 
               {msg.scene && msg.scene.elements && msg.scene.elements.length > 0 && (
                 <SceneRenderer scene={msg.scene} />
