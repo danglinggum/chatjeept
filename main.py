@@ -42,7 +42,7 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-MODELS_TO_TRY = ["gemini-3.6-flash"]
+MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-1.5-flash"]
 
 # =============================================================================
 # Models & Configuration
@@ -112,7 +112,7 @@ class ChatRequest(BaseModel):
 # FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="7.0.0")
+app = FastAPI(title="ChatJEEPT API", version="7.5.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -130,26 +130,17 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Provide deep, rigorous step-by-step explanations.
+Provide complete, rigorous step-by-step mathematical solutions to the very end without skipping any steps.
 
-CRITICAL FORMATTING RULES:
-1. ALWAYS wrap inline math/chemical formulas with single dollar signs `$ ... $` (e.g., `$\\text{SF}_6$`, `$sp^3d^2$`, `$90^\\circ$`).
-2. ALWAYS wrap block formulas with double dollar signs `$$ ... $$`.
-3. NEVER leave raw LaTeX commands like `\\text{}` outside of dollar signs.
-
-CRITICAL 3D VISUALIZATION RULE:
-For ANY question involving molecular shapes, geometry, vectors, forces, orbitals, or 3D planes, YOU MUST ALWAYS INCLUDE A 3D SCENE AT THE END.
-
-Delimiter structure:
-[Your thorough explanation here]
+CRITICAL INSTRUCTIONS:
+1. Wrap ALL inline formulas with `$ ... $` and block formulas with `$$ ... $$`.
+2. Do NOT write repetitive greetings. Go straight into the step-by-step derivation.
+3. NEVER truncate your response. Finish the complete derivation and final answer.
+4. For spatial/geometric questions (skew lines, planes, vectors, molecules), ALWAYS append the 3D scene at the end:
 
 <<<3D_SCENE>>>
 {
-  "elements": [
-    {"kind": "sphere", "position": [0, 0, 0], "radius": 0.4, "color": "#f59e0b", "label": "Center"},
-    {"kind": "sphere", "position": [0, 1.5, 0], "radius": 0.3, "color": "#10b981", "label": "Ligand"},
-    {"kind": "cylinder", "start": [0, 0, 0], "end": [0, 1.5, 0], "color": "#cbd5e1"}
-  ]
+  "elements": [ ... ]
 }
 <<<END_3D_SCENE>>>
 """.strip()
@@ -193,14 +184,14 @@ def generate_ai(model_name: str, prompt: str):
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             temperature=0.2,
-            max_output_tokens=3500,  # 잘림 방지를 위해 넉넉한 토큰 할당
+            max_output_tokens=8192,  # 8192로 확장하여 끊김 완벽 방지
         ),
     )
 
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v7.0"}
+    return {"status": "online", "service": "ChatJEEPT API v7.5"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
@@ -214,7 +205,7 @@ async def chat_endpoint(request: ChatRequest, req: Request):
     check_rate_limit(client_ip)
 
     tutor = TUTOR_CONFIG[request.subject]
-    history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-3:]]
+    history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-2:]]
     prompt = f"Subject: {request.subject}\nMode: {request.mode}\nHistory: {json.dumps(history_ctx)}\nQuestion: {request.message}"
 
     last_err = None
