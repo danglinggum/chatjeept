@@ -31,14 +31,16 @@ interface Message {
   tutor?: string;
 }
 
-const TUTOR_INFO: Record<Subject, { name: string; institute: string; spec: string; color: string }> = {
-  Physics: { name: "Rahul", institute: "IIT Bombay", spec: "Mechanics · E&M · 3D Vectors", color: "text-blue-400" },
-  Chemistry: { name: "Raj", institute: "IIT Delhi", spec: "VSEPR Geometry · Bonding · Organic", color: "text-emerald-400" },
-  Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors", color: "text-violet-400" },
+const TUTOR_INFO: Record<Subject, { name: string; institute: string; spec: string }> = {
+  Physics: { name: "Rahul", institute: "IIT Bombay", spec: "Mechanics · E&M · 3D Vectors" },
+  Chemistry: { name: "Raj", institute: "IIT Delhi", spec: "VSEPR Geometry · Bonding · Organic" },
+  Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors" },
 };
 
-const RAW_API = process.env.NEXT_PUBLIC_API_URL || "https://chatjeept.onrender.com";
-const BACKEND_URL = RAW_API.replace(/\/+$/, "");
+// 순수 URL 문자열만 사용 (Markdown 링크 문법 절대 금지)
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "https://chatjeept.onrender.com"
+).replace(/\/+$/, "");
 
 function SceneRenderer({ scene }: { scene: Scene }) {
   return (
@@ -142,7 +144,7 @@ export default function ChatJEEPTPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/chat`, {
+      const res = await fetch(`${API_BASE_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -177,7 +179,7 @@ export default function ChatJEEPTPage() {
         ...prev,
         {
           role: "assistant",
-          content: `⚠️ ${err.message}`,
+          content: `⚠️ 오류: ${err.message || "연결 오류가 발생했습니다."}`,
           tutor: activeTutor.name,
         },
       ]);
@@ -261,8 +263,7 @@ export default function ChatJEEPTPage() {
             </div>
             <p className="text-sm text-slate-300 leading-relaxed">
               Hello! I will guide you through rigorous <strong>{subject}</strong> concepts for IIT-JEE Advanced.
-              Ask any theoretical doubt, numerical problem, or archival question. I will provide step-by-step
-              derivation with interactive 3D spatial simulations.
+              Ask any theoretical doubt, numerical problem, or archival question.
             </p>
           </div>
         )}
