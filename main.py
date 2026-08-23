@@ -158,7 +158,7 @@ class ChatRequest(BaseModel):
 # FastAPI App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="5.0.0")
+app = FastAPI(title="ChatJEEPT API", version="5.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -170,24 +170,47 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Explain concepts step-by-step using LaTeX ($...$ for inline, $$...$$ for block formulas).
+Explain concepts step-by-step with deep mathematical/physical rigor using LaTeX ($...$ for inline, $$...$$ for block formulas).
 
-OUTPUT INSTRUCTIONS:
-First output your response text.
-Then on a new line output:
+CRITICAL 3D VISUALIZATION DIRECTIVE:
+Whenever the question involves molecules, geometry, vectors, force balance, coordinate planes, magnetic/electric fields, or 3D rotations, YOU MUST ALWAYS GENERATE A 3D SCENE JSON.
+
+3D Scene Element Types:
+1. Sphere (Atoms, point charges, masses, vertices):
+   {"kind": "sphere", "position": [x, y, z], "radius": 0.35, "color": "#38bdf8", "label": "Atom/Mass"}
+2. Cylinder (Chemical bonds, coordinate axes, rigid rods):
+   {"kind": "cylinder", "start": [x1, y1, z1], "end": [x2, y2, z2], "color": "#94a3b8"}
+3. Arrow (Forces, velocities, field vectors, displacement):
+   {"kind": "arrow", "start": [x1, y1, z1], "end": [x2, y2, z2], "color": "#f97316", "label": "Force Vector"}
+
+EXAMPLE - PCl5 Trigonal Bipyramidal Geometry:
 <<<3D_SCENE>>>
-If 3D spatial visualization helps, output valid JSON:
-{"elements": [{"kind": "sphere", "position": [0,0,0], "radius": 0.35, "color": "#60a5fa"}]}
-If not needed, output:
-null
-Then on a new line output:
+{
+  "elements": [
+    {"kind": "sphere", "position": [0, 0, 0], "radius": 0.45, "color": "#f59e0b", "label": "P"},
+    {"kind": "sphere", "position": [0, 1.8, 0], "radius": 0.3, "color": "#10b981", "label": "Cl (Axial)"},
+    {"kind": "sphere", "position": [0, -1.8, 0], "radius": 0.3, "color": "#10b981", "label": "Cl (Axial)"},
+    {"kind": "sphere", "position": [1.5, 0, 0], "radius": 0.3, "color": "#10b981", "label": "Cl (Equatorial)"},
+    {"kind": "sphere", "position": [-0.75, 0, 1.3], "radius": 0.3, "color": "#10b981", "label": "Cl (Equatorial)"},
+    {"kind": "sphere", "position": [-0.75, 0, -1.3], "radius": 0.3, "color": "#10b981", "label": "Cl (Equatorial)"},
+    {"kind": "cylinder", "start": [0, 0, 0], "end": [0, 1.8, 0], "color": "#cbd5e1"},
+    {"kind": "cylinder", "start": [0, 0, 0], "end": [0, -1.8, 0], "color": "#cbd5e1"},
+    {"kind": "cylinder", "start": [0, 0, 0], "end": [1.5, 0, 0], "color": "#cbd5e1"},
+    {"kind": "cylinder", "start": [0, 0, 0], "end": [-0.75, 0, 1.3], "color": "#cbd5e1"},
+    {"kind": "cylinder", "start": [0, 0, 0], "end": [-0.75, 0, -1.3], "color": "#cbd5e1"}
+  ]
+}
 <<<END_3D_SCENE>>>
+
+DELIMITER RULE:
+Always write the text explanation first, then write <<<3D_SCENE>>>, then the JSON (or null only if purely abstract 1D text), then <<<END_3D_SCENE>>>.
 """.strip()
 
 def parse_json_defensively(value: str) -> Any | None:
     if not value or value.strip().lower() == "null":
         return None
-    cleaned = re.sub(r"^```(?:json)?\s*", "", value.strip(), flags=re.IGNORECASE)
+    cleaned = value.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned)
     s_idx = cleaned.find("{")
     e_idx = cleaned.rfind("}")
@@ -255,7 +278,7 @@ async def process_chat(request: ChatRequest, req: Request) -> TutorResponse:
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v5.0"}
+    return {"status": "online", "service": "ChatJEEPT API v5.1"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
