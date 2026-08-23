@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 load_dotenv()
 
 # =============================================================================
-# Security & Rate Limiting
+# Security: Rate Limiting
 # =============================================================================
 
 REQUEST_RECORDS = defaultdict(list)
@@ -33,7 +33,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client
+# Google GenAI Client & Verified Production Models
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -42,7 +42,10 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-1.5-flash"]
+MODELS_TO_TRY = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
 
 # =============================================================================
 # Models & Configuration
@@ -109,10 +112,10 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
 
 # =============================================================================
-# FastAPI Core App
+# FastAPI Core App & Strict CORS Policy
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="7.5.0")
+app = FastAPI(title="ChatJEEPT API", version="8.0.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -130,13 +133,12 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Provide complete, rigorous step-by-step mathematical solutions to the very end without skipping any steps.
+Provide complete, mathematically rigorous step-by-step solutions without unnecessary filler.
 
 CRITICAL INSTRUCTIONS:
-1. Wrap ALL inline formulas with `$ ... $` and block formulas with `$$ ... $$`.
-2. Do NOT write repetitive greetings. Go straight into the step-by-step derivation.
-3. NEVER truncate your response. Finish the complete derivation and final answer.
-4. For spatial/geometric questions (skew lines, planes, vectors, molecules), ALWAYS append the 3D scene at the end:
+1. ALWAYS wrap inline formulas with `$ ... $` and block formulas with `$$ ... $$`.
+2. Do NOT truncate your response. Output the full derivation and answer.
+3. For spatial/geometric questions (molecules, vectors, planes, 3D forces), ALWAYS append the 3D scene at the end:
 
 <<<3D_SCENE>>>
 {
@@ -184,14 +186,14 @@ def generate_ai(model_name: str, prompt: str):
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             temperature=0.2,
-            max_output_tokens=8192,  # 8192로 확장하여 끊김 완벽 방지
+            max_output_tokens=8192,
         ),
     )
 
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v7.5"}
+    return {"status": "online", "service": "ChatJEEPT API v8.0"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
