@@ -20,12 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 load_dotenv()
 
-# =============================================================================
-# Security & Rate Limiting
-# =============================================================================
-
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "jeept2026")
-
 REQUEST_RECORDS = defaultdict(list)
 RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
@@ -34,38 +29,20 @@ def check_rate_limit(ip_address: str):
     now = time.time()
     REQUEST_RECORDS[ip_address] = [t for t in REQUEST_RECORDS[ip_address] if now - t < RATE_LIMIT_WINDOW]
     if len(REQUEST_RECORDS[ip_address]) >= MAX_REQUESTS_PER_WINDOW:
-        raise HTTPException(
-            status_code=429,
-            detail="Too many requests. Please wait a moment before asking another question."
-        )
+        raise HTTPException(status_code=429, detail="요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
     REQUEST_RECORDS[ip_address].append(now)
 
 def verify_admin_key(x_admin_key: str | None = Header(default=None)):
     if not x_admin_key or x_admin_key != ADMIN_SECRET_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized: Invalid Admin Secret Key")
-
-# =============================================================================
-# AI Client Configuration
-# =============================================================================
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
 SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-if not GOOGLE_API_KEY:
-    raise RuntimeError("GOOGLE_API_KEY must be set in Environment Variables")
+ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-ai_client = genai.Client(api_key=GOOGLE_API_KEY)
-
-MODELS_TO_TRY = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-]
-
-# =============================================================================
-# SQLite Analytics & Query Logging
-# =============================================================================
-
+MODELS_TO_TRY = ["gemini-2.0-flash", "gemini-1.5-flash"]
 DB_FILE = Path(__file__).resolve().parent / "chat_logs.db"
 
 def init_db():
@@ -94,10 +71,7 @@ def log_user_query(ip_address: str, subject: str, tutor: str, mode: str, questio
         cursor = conn.cursor()
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            """
-            INSERT INTO query_logs (timestamp, ip_address, subject, tutor, mode, question, has_scene)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+            "INSERT INTO query_logs (timestamp, ip_address, subject, tutor, mode, question, has_scene) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (now_str, ip_address, subject, tutor, mode, question, 1 if has_scene else 0)
         )
         conn.commit()
@@ -105,29 +79,13 @@ def log_user_query(ip_address: str, subject: str, tutor: str, mode: str, questio
     except Exception as e:
         print(f"[Logging Error] {e}")
 
-# =============================================================================
-# Tutor Schema & Models
-# =============================================================================
-
 Subject = Literal["Physics", "Chemistry", "Mathematics"]
 TutorMode = Literal["Socratic Hint", "Full Solution"]
 
 TUTOR_CONFIG: dict[str, dict[str, str]] = {
-    "Physics": {
-        "name": "Rahul",
-        "institution": "IIT Bombay",
-        "specialty": "electromagnetism, mechanics, 3D vectors, force diagrams, fields",
-    },
-    "Chemistry": {
-        "name": "Raj",
-        "institution": "IIT Delhi",
-        "specialty": "VSEPR molecular geometry, chemical bonding, stereochemistry, organic mechanisms",
-    },
-    "Mathematics": {
-        "name": "Amit",
-        "institution": "IIT Kanpur",
-        "specialty": "3D coordinate geometry, vectors, planes, lines, calculus, algebra",
-    },
+    "Physics": {"name": "Rahul", "institution": "IIT Bombay"},
+    "Chemistry": {"name": "Raj", "institution": "IIT Delhi"},
+    "Mathematics": {"name": "Amit", "institution": "IIT Kanpur"},
 }
 
 Vector3 = tuple[float, float, float]
@@ -137,30 +95,30 @@ class SphereElement(BaseModel):
     kind: Literal["sphere"]
     position: Vector3
     radius: float = Field(default=0.35, gt=0, le=5)
-    color: str = Field(default="#60a5fa", pattern=r"^#[0-9A-Fa-f]{6}$")
-    label: str | None = Field(default=None, max_length=100)
+    color: str = Field(default="#60a5fa")
+    label: str | None = None
 
 class CylinderElement(BaseModel):
     model_config = ConfigDict(extra="ignore")
     kind: Literal["cylinder"]
     start: Vector3
     end: Vector3
-    color: str = Field(default="#94a3b8", pattern=r"^#[0-9A-Fa-f]{6}$")
+    color: str = Field(default="#94a3b8")
 
 class ArrowElement(BaseModel):
     model_config = ConfigDict(extra="ignore")
     kind: Literal["arrow"]
     start: Vector3
     end: Vector3
-    color: str = Field(default="#f97316", pattern=r"^#[0-9A-Fa-f]{6}$")
-    label: str | None = Field(default=None, max_length=100)
+    color: str = Field(default="#f97316")
+    label: str | None = None
 
 SceneElement = Annotated[SphereElement | CylinderElement | ArrowElement, Field(discriminator="kind")]
 scene_element_adapter = TypeAdapter(SceneElement)
 
 class Scene(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    elements: list[SceneElement] = Field(default_factory=list, max_length=30)
+    elements: list[SceneElement] = Field(default_factory=list)
 
 class TutorResponse(BaseModel):
     explanation: str
@@ -172,20 +130,16 @@ class TutorResponse(BaseModel):
 class ChatMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=30000)
+    content: str
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    message: str = Field(min_length=1, max_length=30000)
+    message: str
     subject: Subject = "Physics"
     mode: TutorMode = "Socratic Hint"
-    history: list[ChatMessage] = Field(default_factory=list, max_length=40)
+    history: list[ChatMessage] = Field(default_factory=list)
 
-# =============================================================================
-# FastAPI Core App
-# =============================================================================
-
-app = FastAPI(title="ChatJEEPT API", version="3.7.0")
+app = FastAPI(title="ChatJEEPT API", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -195,49 +149,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SYSTEM_INSTRUCTION = f"""
-You are one of the elite ChatJEEPT IIT-JEE Master Tutors.
-
-GENERAL TEACHING RULES:
-1. Remain strictly faithful to the active tutor persona (Rahul for Physics, Raj for Chemistry, Amit for Mathematics).
-2. Write the explanation in clear English using standard LaTeX ($...$ for inline, $$...$$ for display).
-3. Never wrap the explanation in quotation marks or JSON.
-
-REQUIRED OUTPUT FORMAT:
-First write the complete explanation.
-Then output on its own line:
-{SCENE_START_MARKER}
-If a 3D visualization is helpful, output valid JSON:
-{{
-  "elements": [
-    {{"kind": "sphere", "position": [0, 0, 0], "radius": 0.35, "color": "#60a5fa", "label": "Mass"}},
-    {{"kind": "cylinder", "start": [0, 0, 0], "end": [1, 0, 0], "color": "#94a3b8"}},
-    {{"kind": "arrow", "start": [0, 0, 0], "end": [0, 2, 0], "color": "#f97316", "label": "Force F"}}
-  ]
-}}
-If no 3D visualization is helpful, output:
-null
-Then output on its own line:
-{SCENE_END_MARKER}
-""".strip()
-
-def build_prompt(request: ChatRequest) -> str:
-    tutor = TUTOR_CONFIG[request.subject]
-    history_payload = [{"role": item.role, "content": item.content} for item in request.history[-6:]]
-    history_text = json.dumps(history_payload, ensure_ascii=False, indent=2)
-
-    return f"""
-ACTIVE TUTOR: Master {tutor["name"]} ({tutor["institution"]})
-SUBJECT: {request.subject}
-MODE: {request.mode}
-
-CONVERSATION HISTORY:
-{history_text}
-
-STUDENT QUESTION:
-{request.message}
-
-Answer as Master {tutor["name"]} in English adhering to the exact delimiter rules.
+SYSTEM_INSTRUCTION = """
+You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
+Explain concepts step-by-step using LaTeX ($...$ and $$...$$).
+If 3D spatial setup is helpful, end with:
+<<<3D_SCENE>>>
+{"elements": [{"kind": "sphere", "position": [0,0,0], "radius": 0.35, "color": "#60a5fa"}]}
+<<<END_3D_SCENE>>>
+If not needed, output null between delimiters.
 """.strip()
 
 def parse_json_defensively(value: str) -> Any | None:
@@ -254,15 +173,12 @@ def parse_json_defensively(value: str) -> Any | None:
     except Exception:
         return None
 
-def extract_explanation_and_scene(raw_response: str) -> tuple[str, Scene | None]:
-    text = raw_response.strip()
-    if SCENE_START_MARKER not in text:
-        return text, None
-
-    parts = text.split(SCENE_START_MARKER)
+def extract_explanation_and_scene(raw_text: str) -> tuple[str, Scene | None]:
+    if SCENE_START_MARKER not in raw_text:
+        return raw_text.strip(), None
+    parts = raw_text.split(SCENE_START_MARKER)
     explanation = parts[0].strip()
     scene_part = parts[1].split(SCENE_END_MARKER)[0].strip() if SCENE_END_MARKER in parts[1] else parts[1].strip()
-
     parsed = parse_json_defensively(scene_part)
     scene = None
     if isinstance(parsed, dict) and "elements" in parsed:
@@ -271,146 +187,75 @@ def extract_explanation_and_scene(raw_response: str) -> tuple[str, Scene | None]
             scene = Scene(elements=valid_elements)
         except Exception:
             scene = None
-
     return explanation, scene
 
 @app.get("/")
 async def root():
-    return {"status": "online", "service": "ChatJEEPT API", "endpoints": ["/api/chat", "/chat", "/api/admin/stats"]}
+    return {"status": "online", "service": "ChatJEEPT API v4.0"}
 
-def generate_ai_content_sync(model_name: str, prompt: str):
+def generate_ai(model_name: str, prompt: str):
     return ai_client.models.generate_content(
         model=model_name,
         contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.2,
-            max_output_tokens=3000,
-        ),
+        config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.2),
     )
 
-async def handle_chat_core(request: ChatRequest, req: Request) -> TutorResponse:
+async def process_chat(request: ChatRequest, req: Request) -> TutorResponse:
+    if not ai_client:
+        raise HTTPException(status_code=500, detail="Google API Key is not configured.")
     client_ip = req.headers.get("x-forwarded-for", req.client.host if req.client else "127.0.0.1").split(",")[0].strip()
     check_rate_limit(client_ip)
 
     tutor = TUTOR_CONFIG[request.subject]
-    prompt = build_prompt(request)
-    last_error = None
+    prompt = f"Subject: {request.subject}\nMode: {request.mode}\nQuestion: {request.message}"
+    last_err = None
 
-    for model_name in MODELS_TO_TRY:
+    for m in MODELS_TO_TRY:
         try:
-            response = await asyncio.to_thread(generate_ai_content_sync, model_name, prompt)
-            raw_text = response.text or ""
-            if raw_text.strip():
-                explanation, scene = extract_explanation_and_scene(raw_text)
-                
-                log_user_query(
-                    ip_address=client_ip,
-                    subject=request.subject,
-                    tutor=tutor["name"],
-                    mode=request.mode,
-                    question=request.message,
-                    has_scene=scene is not None
-                )
-
-                return TutorResponse(
-                    explanation=explanation,
-                    scene=scene,
-                    tutor=tutor["name"],
-                    subject=request.subject,
-                    mode=request.mode,
-                )
-        except Exception as exc:
-            last_error = exc
-            print(f"[Fallback Error] {model_name}: {exc}")
+            res = await asyncio.to_thread(generate_ai, m, prompt)
+            raw = res.text or ""
+            if raw.strip():
+                exp, sc = extract_explanation_and_scene(raw)
+                log_user_query(client_ip, request.subject, tutor["name"], request.mode, request.message, sc is not None)
+                return TutorResponse(explanation=exp, scene=sc, tutor=tutor["name"], subject=request.subject, mode=request.mode)
+        except Exception as e:
+            last_err = e
             continue
 
-    raise HTTPException(status_code=500, detail=f"AI generation failed: {str(last_error)}")
+    raise HTTPException(status_code=500, detail=f"AI 오류: {str(last_err)}")
 
-@app.post("/api/chat", response_model=TutorResponse)
-async def chat_api(request: ChatRequest, req: Request):
-    return await handle_chat_core(request, req)
+@app.post("/api/chat")
+@app.post("/api/chat/")
+@app.post("/chat")
+@app.post("/chat/")
+async def chat_all(request: ChatRequest, req: Request):
+    return await process_chat(request, req)
 
-@app.post("/chat", response_model=TutorResponse)
-async def chat_direct(request: ChatRequest, req: Request):
-    return await handle_chat_core(request, req)
-
-# =============================================================================
-# Admin Endpoints (Dual Path Support)
-# =============================================================================
-
-async def handle_stats_core():
-    init_db()
+@app.get("/api/admin/stats")
+@app.get("/admin/stats")
+async def stats(x_admin_key: str | None = Header(default=None)):
+    verify_admin_key(x_admin_key)
     conn = sqlite3.connect(str(DB_FILE))
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM query_logs")
-    total_queries = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(DISTINCT ip_address) FROM query_logs")
-    unique_visitors = cursor.fetchone()[0]
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("SELECT COUNT(*) FROM query_logs WHERE timestamp LIKE ?", (f"{today_str}%",))
-    today_queries = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM query_logs WHERE has_scene = 1")
-    scenes_generated = cursor.fetchone()[0]
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM query_logs")
+    t = c.fetchone()[0]
+    c.execute("SELECT COUNT(DISTINCT ip_address) FROM query_logs")
+    u = c.fetchone()[0]
+    today = datetime.now().strftime("%Y-%m-%d")
+    c.execute("SELECT COUNT(*) FROM query_logs WHERE timestamp LIKE ?", (f"{today}%",))
+    td = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM query_logs WHERE has_scene = 1")
+    sc = c.fetchone()[0]
     conn.close()
+    return {"total_queries": t, "unique_visitors": u, "today_queries": td, "scenes_generated": sc}
 
-    return {
-        "total_queries": total_queries,
-        "unique_visitors": unique_visitors,
-        "today_queries": today_queries,
-        "scenes_generated": scenes_generated,
-    }
-
-@app.get("/api/admin/stats", dependencies=[Depends(verify_admin_key)])
-async def get_admin_stats():
-    return await handle_stats_core()
-
-@app.get("/admin/stats", dependencies=[Depends(verify_admin_key)])
-async def get_admin_stats_alt():
-    return await handle_stats_core()
-
-async def handle_queries_core(limit: int = 100):
-    init_db()
+@app.get("/api/admin/queries")
+@app.get("/admin/queries")
+async def queries(limit: int = 100, x_admin_key: str | None = Header(default=None)):
+    verify_admin_key(x_admin_key)
     conn = sqlite3.connect(str(DB_FILE))
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, timestamp, ip_address, subject, tutor, mode, question, has_scene
-        FROM query_logs
-        ORDER BY id DESC
-        LIMIT ?
-    """, (limit,))
-    rows = cursor.fetchall()
+    c = conn.cursor()
+    c.execute("SELECT id, timestamp, ip_address, subject, tutor, mode, question, has_scene FROM query_logs ORDER BY id DESC LIMIT ?", (limit,))
+    rows = c.fetchall()
     conn.close()
-
-    logs = []
-    for r in rows:
-        logs.append({
-            "id": r[0],
-            "timestamp": r[1],
-            "ip_address": r[2],
-            "subject": r[3],
-            "tutor": r[4],
-            "mode": r[5],
-            "question": r[6],
-            "has_scene": bool(r[7]),
-        })
-    return {"logs": logs}
-
-@app.get("/api/admin/queries", dependencies=[Depends(verify_admin_key)])
-async def get_admin_queries(limit: int = 100):
-    return await handle_queries_core(limit)
-
-@app.get("/admin/queries", dependencies=[Depends(verify_admin_key)])
-async def get_admin_queries_alt(limit: int = 100):
-    return await handle_queries_core(limit)
-
-@app.post("/api/admin/seed-test-log", dependencies=[Depends(verify_admin_key)])
-@app.post("/admin/seed-test-log", dependencies=[Depends(verify_admin_key)])
-async def seed_test_log():
-    log_user_query("127.0.0.1", "Physics", "Rahul", "Socratic Hint", "What is pure rolling condition on rough incline?", True)
-    log_user_query("127.0.0.1", "Chemistry", "Raj", "Full Solution", "Explain PCl5 trigonal bipyramidal bond angles", True)
-    return {"status": "success", "message": "Test logs created successfully"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    return {"logs": [{"id": r[0], "timestamp": r[1], "ip_address": r[2], "subject": r[3], "tutor": r[4], "mode": r[5], "question": r[6], "has_scene": bool(r[7])} for r in rows]}
