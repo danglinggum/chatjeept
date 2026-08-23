@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal
 from collections import defaultdict
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Header, Depends
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
@@ -31,10 +31,6 @@ def check_rate_limit(ip_address: str):
     if len(REQUEST_RECORDS[ip_address]) >= MAX_REQUESTS_PER_WINDOW:
         raise HTTPException(status_code=429, detail="요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
     REQUEST_RECORDS[ip_address].append(now)
-
-def verify_admin_key(x_admin_key: str | None = Header(default=None)):
-    if not x_admin_key or x_admin_key != ADMIN_SECRET_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
 SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
@@ -234,7 +230,8 @@ async def chat_all(request: ChatRequest, req: Request):
 @app.get("/api/admin/stats")
 @app.get("/admin/stats")
 async def stats(x_admin_key: str | None = Header(default=None)):
-    verify_admin_key(x_admin_key)
+    if x_admin_key != ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
     conn = sqlite3.connect(str(DB_FILE))
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM query_logs")
@@ -252,10 +249,15 @@ async def stats(x_admin_key: str | None = Header(default=None)):
 @app.get("/api/admin/queries")
 @app.get("/admin/queries")
 async def queries(limit: int = 100, x_admin_key: str | None = Header(default=None)):
-    verify_admin_key(x_admin_key)
+    if x_admin_key != ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
     conn = sqlite3.connect(str(DB_FILE))
     c = conn.cursor()
     c.execute("SELECT id, timestamp, ip_address, subject, tutor, mode, question, has_scene FROM query_logs ORDER BY id DESC LIMIT ?", (limit,))
     rows = c.fetchall()
     conn.close()
     return {"logs": [{"id": r[0], "timestamp": r[1], "ip_address": r[2], "subject": r[3], "tutor": r[4], "mode": r[5], "question": r[6], "has_scene": bool(r[7])} for r in rows]}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
