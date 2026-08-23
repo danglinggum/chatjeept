@@ -20,10 +20,6 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 load_dotenv()
 
-# =============================================================================
-# Security & Rate Limiting
-# =============================================================================
-
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "jeept2026")
 
 REQUEST_RECORDS = defaultdict(list)
@@ -44,10 +40,6 @@ def verify_admin_key(x_admin_key: str | None = Header(default=None)):
     if not x_admin_key or x_admin_key != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=403, detail="Unauthorized: Invalid Admin Secret Key")
 
-# =============================================================================
-# AI Client
-# =============================================================================
-
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
 SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 
@@ -58,13 +50,10 @@ if not GOOGLE_API_KEY:
 ai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 MODELS_TO_TRY = [
-    "gemini-2.5-flash",
     "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
 ]
-
-# =============================================================================
-# SQLite Analytics & Query Logging
-# =============================================================================
 
 DB_FILE = Path(__file__).resolve().parent / "chat_logs.db"
 
@@ -104,10 +93,6 @@ def log_user_query(ip_address: str, subject: str, tutor: str, mode: str, questio
         conn.close()
     except Exception as e:
         print(f"[Logging Error] {e}")
-
-# =============================================================================
-# Models
-# =============================================================================
 
 Subject = Literal["Physics", "Chemistry", "Mathematics"]
 TutorMode = Literal["Socratic Hint", "Full Solution"]
@@ -181,11 +166,7 @@ class ChatRequest(BaseModel):
     mode: TutorMode = "Socratic Hint"
     history: list[ChatMessage] = Field(default_factory=list, max_length=40)
 
-# =============================================================================
-# FastAPI Setup & CORS
-# =============================================================================
-
-app = FastAPI(title="ChatJEEPT API", version="3.5.0")
+app = FastAPI(title="ChatJEEPT API", version="3.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -223,11 +204,12 @@ Then output on its own line:
 
 def build_prompt(request: ChatRequest) -> str:
     tutor = TUTOR_CONFIG[request.subject]
+    rag_context = "Archival reference active."
     try:
         from rag import retrieve_relevant_jee_context
         rag_context = retrieve_relevant_jee_context(request.message, request.subject, top_k=2)
     except Exception:
-        rag_context = "No archival reference available."
+        pass
 
     history_payload = [{"role": item.role, "content": item.content} for item in request.history[-6:]]
     history_text = json.dumps(history_payload, ensure_ascii=False, indent=2)

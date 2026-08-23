@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
@@ -36,6 +36,8 @@ const TUTOR_INFO: Record<Subject, { name: string; institute: string; spec: strin
   Chemistry: { name: "Raj", institute: "IIT Delhi", spec: "VSEPR Geometry · Bonding · Organic", color: "text-emerald-400" },
   Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors", color: "text-violet-400" },
 };
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://chatjeept.onrender.com";
 
 function SceneRenderer({ scene }: { scene: Scene }) {
   return (
@@ -139,8 +141,7 @@ export default function ChatJEEPTPage() {
     setLoading(true);
 
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-      const res = await fetch(`${API_BASE}/api/chat`, {
+      const res = await fetch(`${BACKEND_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -152,8 +153,12 @@ export default function ChatJEEPTPage() {
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({ detail: "Network error" }));
-        throw new Error(errData.detail || `Server error: ${res.status}`);
+        let errDetail = `서버 응답 오류 (HTTP ${res.status})`;
+        try {
+          const errData = await res.json();
+          if (errData.detail) errDetail = errData.detail;
+        } catch (_) {}
+        throw new Error(errDetail);
       }
 
       const data = await res.json();
@@ -171,7 +176,7 @@ export default function ChatJEEPTPage() {
         ...prev,
         {
           role: "assistant",
-          content: `⚠️ 오류가 발생했습니다: ${err.message}`,
+          content: `⚠️ 오류: ${err.message || "서버에 연결할 수 없습니다. (Render 절전 모드 해제 중일 수 있으니 30초 후 다시 시도해 주세요)"}`,
           tutor: activeTutor.name,
         },
       ]);
