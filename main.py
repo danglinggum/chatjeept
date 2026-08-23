@@ -33,7 +33,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client & Verified Production Models
+# Google GenAI Client
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -42,9 +42,9 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
+# 공식 권장 활성 모델
 MODELS_TO_TRY = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-3.6-flash",
 ]
 
 # =============================================================================
@@ -112,10 +112,10 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
 
 # =============================================================================
-# FastAPI Core App & Strict CORS Policy
+# FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="8.0.0")
+app = FastAPI(title="ChatJEEPT API", version="8.1.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -133,12 +133,12 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Provide complete, mathematically rigorous step-by-step solutions without unnecessary filler.
+Provide complete, mathematically rigorous step-by-step solutions without conversational fluff.
 
 CRITICAL INSTRUCTIONS:
 1. ALWAYS wrap inline formulas with `$ ... $` and block formulas with `$$ ... $$`.
-2. Do NOT truncate your response. Output the full derivation and answer.
-3. For spatial/geometric questions (molecules, vectors, planes, 3D forces), ALWAYS append the 3D scene at the end:
+2. Do NOT truncate your response. Output the full derivation and final answer.
+3. For spatial/geometric questions (molecules, vectors, planes, forces), ALWAYS append the 3D scene at the end:
 
 <<<3D_SCENE>>>
 {
@@ -193,7 +193,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v8.0"}
+    return {"status": "online", "service": "ChatJEEPT API v8.1"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
