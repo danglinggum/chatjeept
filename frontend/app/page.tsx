@@ -2,6 +2,11 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
 const ThreeCanvas = dynamic(() => import("@react-three/fiber").then((mod) => mod.Canvas), { ssr: false });
 const OrbitControls = dynamic(() => import("@react-three/drei").then((mod) => mod.OrbitControls), { ssr: false });
@@ -47,65 +52,13 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
-// LaTeX 수식 및 마크다운 포맷팅 렌더러
-function FormattedMessage({ content }: { content: string }) {
-  const cleanText = content.split("<<<3D_SCENE>>>")[0].trim();
-  const blocks = cleanText.split(/(\$\$[\s\S]*?\$\$)/g);
-
-  return (
-    <div className="space-y-3 leading-relaxed text-sm text-slate-200 font-sans">
-      {blocks.map((block, idx) => {
-        if (block.startsWith("$$") && block.endsWith("$$")) {
-          const math = block.slice(2, -2).trim();
-          return (
-            <div
-              key={idx}
-              className="my-3 p-3.5 bg-slate-950/90 border border-cyan-800/40 rounded-2xl text-center font-mono text-cyan-300 text-sm overflow-x-auto shadow-inner"
-            >
-              {math}
-            </div>
-          );
-        }
-
-        return (
-          <div key={idx} className="space-y-2">
-            {block.split("\n").map((line, lIdx) => {
-              if (!line.trim()) return <div key={lIdx} className="h-1" />;
-              return (
-                <div key={lIdx} className="leading-relaxed">
-                  {renderInline(line)}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function renderInline(text: string) {
-  const parts = text.split(/(\$[^\$\n]+\$|\*\*[^\*]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
-      return (
-        <span
-          key={i}
-          className="font-mono text-cyan-300 bg-slate-800/90 px-1.5 py-0.5 rounded text-[13px] mx-0.5 border border-cyan-900/40 font-semibold"
-        >
-          {part.slice(1, -1)}
-        </span>
-      );
-    }
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return (
-        <strong key={i} className="font-bold text-white tracking-wide">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    return part;
-  });
+// AI가 수식 기호($)를 빠뜨렸을 때 자동 복구해주는 전처리기
+function autoFixLatex(text: string): string {
+  let clean = text.split("<<<3D_SCENE>>>")[0].trim();
+  clean = clean.replace(/(?<!\$)\\text\{[^\}]+\}(?:_[0-9a-zA-Z]+)?(?!\$)/g, (m) => `$${m}$`);
+  clean = clean.replace(/(?<!\$)(\bsp\^[0-9a-zA-Z\^]+)(?!\$)/gi, (m) => `$${m}$`);
+  clean = clean.replace(/(?<!\$)([0-9]+\^\\circ)(?!\$)/g, (m) => `$${m}$`);
+  return clean;
 }
 
 function SceneRenderer({ scene }: { scene: Scene }) {
@@ -159,8 +112,8 @@ function SceneRenderer({ scene }: { scene: Scene }) {
 }
 
 export default function ChatJEEPTPage() {
-  const [subject, setSubject] = useState<Subject>("Physics");
-  const [mode, setMode] = useState<TutorMode>("Socratic Hint");
+  const [subject, setSubject] = useState<Subject>("Chemistry");
+  const [mode, setMode] = useState<TutorMode>("Full Solution");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -350,7 +303,30 @@ export default function ChatJEEPTPage() {
               {msg.role === "user" ? (
                 <div className="text-sm font-sans">{msg.content}</div>
               ) : (
-                <FormattedMessage content={msg.content} />
+                <div className="space-y-3 leading-relaxed text-sm text-slate-200">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={{
+                      table: ({ ...props }) => (
+                        <div className="overflow-x-auto my-4 rounded-xl border border-slate-800 bg-slate-950/70 shadow-md">
+                          <table className="w-full text-left text-xs text-slate-200 divide-y divide-slate-800" {...props} />
+                        </div>
+                      ),
+                      thead: ({ ...props }) => <thead className="bg-slate-800/80 font-bold text-cyan-400" {...props} />,
+                      th: ({ ...props }) => <th className="px-4 py-2.5 font-bold border-b border-slate-700" {...props} />,
+                      td: ({ ...props }) => <td className="px-4 py-2 border-b border-slate-800/60 font-mono text-slate-300" {...props} />,
+                      h1: ({ ...props }) => <h1 className="text-lg font-black text-cyan-400 mt-4 mb-2" {...props} />,
+                      h2: ({ ...props }) => <h2 className="text-base font-bold text-cyan-300 mt-3 mb-2" {...props} />,
+                      h3: ({ ...props }) => <h3 className="text-sm font-bold text-cyan-200 mt-3 mb-1" {...props} />,
+                      p: ({ ...props }) => <p className="mb-2 leading-relaxed text-sm text-slate-200" {...props} />,
+                      strong: ({ ...props }) => <strong className="font-bold text-white tracking-wide" {...props} />,
+                      hr: ({ ...props }) => <hr className="my-4 border-slate-800" {...props} />,
+                    }}
+                  >
+                    {autoFixLatex(msg.content)}
+                  </ReactMarkdown>
+                </div>
               )}
 
               {msg.scene && msg.scene.elements && msg.scene.elements.length > 0 && (
