@@ -37,7 +37,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client (2026 최신 Flash 모델)
+# Google GenAI Client
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -47,8 +47,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
 MODELS_TO_TRY = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-3.6-flash",
 ]
 
 # =============================================================================
@@ -159,7 +158,7 @@ class ChatRequest(BaseModel):
 # FastAPI App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="4.5.0")
+app = FastAPI(title="ChatJEEPT API", version="5.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -256,7 +255,7 @@ async def process_chat(request: ChatRequest, req: Request) -> TutorResponse:
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v4.5"}
+    return {"status": "online", "service": "ChatJEEPT API v5.0"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
