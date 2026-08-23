@@ -20,6 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 load_dotenv()
 
+# =============================================================================
+# Auth & Security
+# =============================================================================
+
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "jeept2026")
 REQUEST_RECORDS = defaultdict(list)
 RATE_LIMIT_WINDOW = 60
@@ -29,8 +33,12 @@ def check_rate_limit(ip_address: str):
     now = time.time()
     REQUEST_RECORDS[ip_address] = [t for t in REQUEST_RECORDS[ip_address] if now - t < RATE_LIMIT_WINDOW]
     if len(REQUEST_RECORDS[ip_address]) >= MAX_REQUESTS_PER_WINDOW:
-        raise HTTPException(status_code=429, detail="요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait a moment.")
     REQUEST_RECORDS[ip_address].append(now)
+
+# =============================================================================
+# Google GenAI Client (2026 최신 Flash 모델)
+# =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
 SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
@@ -38,7 +46,15 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-MODELS_TO_TRY = ["gemini-2.0-flash", "gemini-1.5-flash"]
+MODELS_TO_TRY = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
+
+# =============================================================================
+# SQLite Database
+# =============================================================================
+
 DB_FILE = Path(__file__).resolve().parent / "chat_logs.db"
 
 def init_db():
@@ -74,6 +90,10 @@ def log_user_query(ip_address: str, subject: str, tutor: str, mode: str, questio
         conn.close()
     except Exception as e:
         print(f"[Logging Error] {e}")
+
+# =============================================================================
+# Pydantic Models & Persona Config
+# =============================================================================
 
 Subject = Literal["Physics", "Chemistry", "Mathematics"]
 TutorMode = Literal["Socratic Hint", "Full Solution"]
@@ -135,7 +155,11 @@ class ChatRequest(BaseModel):
     mode: TutorMode = "Socratic Hint"
     history: list[ChatMessage] = Field(default_factory=list)
 
-app = FastAPI(title="ChatJEEPT API", version="4.0.0")
+# =============================================================================
+# FastAPI App
+# =============================================================================
+
+app = FastAPI(title="ChatJEEPT API", version="4.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -147,12 +171,18 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Explain concepts step-by-step using LaTeX ($...$ and $$...$$).
-If 3D spatial setup is helpful, end with:
+Explain concepts step-by-step using LaTeX ($...$ for inline, $$...$$ for block formulas).
+
+OUTPUT INSTRUCTIONS:
+First output your response text.
+Then on a new line output:
 <<<3D_SCENE>>>
+If 3D spatial visualization helps, output valid JSON:
 {"elements": [{"kind": "sphere", "position": [0,0,0], "radius": 0.35, "color": "#60a5fa"}]}
+If not needed, output:
+null
+Then on a new line output:
 <<<END_3D_SCENE>>>
-If not needed, output null between delimiters.
 """.strip()
 
 def parse_json_defensively(value: str) -> Any | None:
@@ -185,30 +215,32 @@ def extract_explanation_and_scene(raw_text: str) -> tuple[str, Scene | None]:
             scene = None
     return explanation, scene
 
-@app.get("/")
-async def root():
-    return {"status": "online", "service": "ChatJEEPT API v4.0"}
-
 def generate_ai(model_name: str, prompt: str):
     return ai_client.models.generate_content(
         model=model_name,
         contents=prompt,
-        config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.2),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            temperature=0.2,
+            max_output_tokens=3000,
+        ),
     )
 
 async def process_chat(request: ChatRequest, req: Request) -> TutorResponse:
     if not ai_client:
-        raise HTTPException(status_code=500, detail="Google API Key is not configured.")
+        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY is not configured on Render.")
+    
     client_ip = req.headers.get("x-forwarded-for", req.client.host if req.client else "127.0.0.1").split(",")[0].strip()
     check_rate_limit(client_ip)
 
     tutor = TUTOR_CONFIG[request.subject]
-    prompt = f"Subject: {request.subject}\nMode: {request.mode}\nQuestion: {request.message}"
-    last_err = None
+    history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-4:]]
+    prompt = f"Subject: {request.subject}\nMode: {request.mode}\nHistory: {json.dumps(history_ctx)}\nQuestion: {request.message}"
 
-    for m in MODELS_TO_TRY:
+    last_err = None
+    for model_name in MODELS_TO_TRY:
         try:
-            res = await asyncio.to_thread(generate_ai, m, prompt)
+            res = await asyncio.to_thread(generate_ai, model_name, prompt)
             raw = res.text or ""
             if raw.strip():
                 exp, sc = extract_explanation_and_scene(raw)
@@ -218,18 +250,24 @@ async def process_chat(request: ChatRequest, req: Request) -> TutorResponse:
             last_err = e
             continue
 
-    raise HTTPException(status_code=500, detail=f"AI 오류: {str(last_err)}")
+    raise HTTPException(status_code=500, detail=f"AI generation failed: {str(last_err)}")
 
-@app.post("/api/chat")
-@app.post("/api/chat/")
-@app.post("/chat")
-@app.post("/chat/")
-async def chat_all(request: ChatRequest, req: Request):
+# Endpoints
+@app.get("/")
+@app.get("/health")
+async def health():
+    return {"status": "online", "service": "ChatJEEPT API v4.5"}
+
+@app.post("/api/chat", response_model=TutorResponse)
+@app.post("/api/chat/", response_model=TutorResponse)
+@app.post("/chat", response_model=TutorResponse)
+@app.post("/chat/", response_model=TutorResponse)
+async def chat_endpoint(request: ChatRequest, req: Request):
     return await process_chat(request, req)
 
 @app.get("/api/admin/stats")
 @app.get("/admin/stats")
-async def stats(x_admin_key: str | None = Header(default=None)):
+async def get_stats(x_admin_key: str | None = Header(default=None)):
     if x_admin_key != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=403, detail="Unauthorized")
     conn = sqlite3.connect(str(DB_FILE))
@@ -248,7 +286,7 @@ async def stats(x_admin_key: str | None = Header(default=None)):
 
 @app.get("/api/admin/queries")
 @app.get("/admin/queries")
-async def queries(limit: int = 100, x_admin_key: str | None = Header(default=None)):
+async def get_queries(limit: int = 100, x_admin_key: str | None = Header(default=None)):
     if x_admin_key != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=403, detail="Unauthorized")
     conn = sqlite3.connect(str(DB_FILE))
