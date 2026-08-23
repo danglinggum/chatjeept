@@ -37,10 +37,19 @@ const TUTOR_INFO: Record<Subject, { name: string; institute: string; spec: strin
   Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors" },
 };
 
-// 순수 URL 문자열만 사용 (Markdown 링크 문법 절대 금지)
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "https://chatjeept.onrender.com"
-).replace(/\/+$/, "");
+// 어떤 잘못된 환경 변수가 들어와도 순수 백엔드 도메인만 추출하는 함수
+function resolveBackendUrl(): string {
+  let raw = process.env.NEXT_PUBLIC_API_URL || "https://chatjeept.onrender.com";
+  // 마크다운 문법 제거: [text](http...) -> http...
+  const mdMatch = raw.match(/\((https?:\/\/[^\)]+)\)/);
+  if (mdMatch) raw = mdMatch[1];
+  // 따옴표 및 대괄호 제거
+  raw = raw.replace(/["'\[\]]/g, "").trim().replace(/\/+$/, "");
+  if (!raw.startsWith("http")) return "https://chatjeept.onrender.com";
+  return raw;
+}
+
+const BACKEND_URL = resolveBackendUrl();
 
 function SceneRenderer({ scene }: { scene: Scene }) {
   return (
@@ -143,8 +152,10 @@ export default function ChatJEEPTPage() {
     setMessages(newHistory);
     setLoading(true);
 
+    const requestUrl = `${BACKEND_URL}/api/chat`;
+
     try {
-      const res = await fetch(`${API_BASE_URL}/api/chat`, {
+      const res = await fetch(requestUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -156,10 +167,10 @@ export default function ChatJEEPTPage() {
       });
 
       if (!res.ok) {
-        let errDetail = `서버 응답 오류 (HTTP ${res.status})`;
+        let errDetail = `HTTP ${res.status} (요청주소: ${requestUrl})`;
         try {
           const errData = await res.json();
-          if (errData.detail) errDetail = errData.detail;
+          if (errData.detail) errDetail = `${errData.detail} (HTTP ${res.status})`;
         } catch (_) {}
         throw new Error(errDetail);
       }
