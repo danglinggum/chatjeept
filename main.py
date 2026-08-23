@@ -28,16 +28,9 @@ load_dotenv()
 
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "jeept2026")
 
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-]
-
 REQUEST_RECORDS = defaultdict(list)
 RATE_LIMIT_WINDOW = 60
-MAX_REQUESTS_PER_WINDOW = 15
+MAX_REQUESTS_PER_WINDOW = 30
 
 def check_rate_limit(ip_address: str):
     now = time.time()
@@ -62,13 +55,13 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 if not GOOGLE_API_KEY:
-    raise RuntimeError("GOOGLE_API_KEY or GEMINI_API_KEY environment variable must be set in .env")
+    raise RuntimeError("GOOGLE_API_KEY must be set in Environment Variables")
 
 ai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 MODELS_TO_TRY = [
-    "gemini-3.6-flash",
     "gemini-2.5-flash",
+    "gemini-2.0-flash",
 ]
 
 # =============================================================================
@@ -191,16 +184,16 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list, max_length=40)
 
 # =============================================================================
-# FastAPI Setup & Delimiters
+# FastAPI Setup
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT Secure API", version="3.4.0")
+app = FastAPI(title="ChatJEEPT API", version="3.5.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -238,7 +231,7 @@ def build_prompt(request: ChatRequest) -> str:
     except Exception:
         rag_context = "No archival reference available."
 
-    history_payload = [{"role": item.role, "content": item.content} for item in request.history[-20:]]
+    history_payload = [{"role": item.role, "content": item.content} for item in request.history[-6:]]
     history_text = json.dumps(history_payload, ensure_ascii=False, indent=2)
 
     return f"""
@@ -302,8 +295,8 @@ def generate_ai_content_sync(model_name: str, prompt: str):
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.25,
-            max_output_tokens=8192,
+            temperature=0.2,
+            max_output_tokens=3000,
         ),
     )
 
@@ -347,7 +340,7 @@ async def chat(request: ChatRequest, req: Request) -> TutorResponse:
     raise HTTPException(status_code=500, detail=f"AI generation failed: {str(last_error)}")
 
 # =============================================================================
-# Admin Endpoints
+# Admin Endpoints (실시간 통계 & 로그 조회)
 # =============================================================================
 
 @app.get("/api/admin/stats", dependencies=[Depends(verify_admin_key)])
@@ -415,4 +408,4 @@ async def seed_test_log():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
