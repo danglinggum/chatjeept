@@ -35,13 +35,33 @@ MODEL_NAMES = [
     name.strip()
     for name in os.getenv(
         "GEMINI_MODELS",
-        "gemini-3.7-flash,gemini-3.6-flash",
+        "gemini-3.6-flash,gemini-3.5-flash",
     ).split(",")
     if name.strip()
 ]
-MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "16384"))
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "6144"))
+MAX_REFERENCE_CHARACTERS = int(os.getenv("MAX_REFERENCE_CHARACTERS", "12000"))
+GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "30000"))
+GEMINI_CALL_TIMEOUT_SECONDS = float(os.getenv("GEMINI_CALL_TIMEOUT_SECONDS", "28"))
+SCENE_CALL_TIMEOUT_SECONDS = float(os.getenv("SCENE_CALL_TIMEOUT_SECONDS", "10"))
+ENDPOINT_TIMEOUT_SECONDS = float(os.getenv("ENDPOINT_TIMEOUT_SECONDS", "48"))
 
-ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
+def create_genai_client():
+    if not GOOGLE_API_KEY:
+        return None
+
+    try:
+        return genai.Client(
+            api_key=GOOGLE_API_KEY,
+            http_options=types.HttpOptions(timeout=GEMINI_HTTP_TIMEOUT_MS),
+        )
+    except (AttributeError, TypeError):
+        # Compatibility fallback for an older google-genai package. The
+        # asyncio.wait_for guards below still enforce application timeouts.
+        return genai.Client(api_key=GOOGLE_API_KEY)
+
+
+ai_client = create_genai_client()
 
 
 # =============================================================================
@@ -231,7 +251,12 @@ def load_reference_data(subject: Subject) -> str:
             raw = path.read_text(encoding="utf-8")
             parsed = json.loads(raw)
             serialized = json.dumps(parsed, ensure_ascii=False, indent=2)
-            return serialized[:100000]
+            if len(serialized) > MAX_REFERENCE_CHARACTERS:
+                serialized = (
+                    serialized[:MAX_REFERENCE_CHARACTERS]
+                    + "\n[REFERENCE DATA TRUNCATED FOR LATENCY]"
+                )
+            return serialized
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
 
@@ -258,7 +283,8 @@ WRITTEN EXPLANATION
 4. Close every LaTeX brace, delimiter, and environment before continuing.
 5. Do not place ordinary explanatory paragraphs inside math delimiters.
 6. Prefer ordinary Markdown lists over large aligned environments.
-7. Keep the response under approximately 3,000 words so it reaches the scene.
+7. Keep the response under approximately 1,200 words so it reaches the scene
+   quickly. For simple questions, answer much more briefly.
 
 TEACHING MODES
 
@@ -321,8 +347,11 @@ SCENE RULES
 def build_prompt(request: ChatRequest) -> str:
     tutor = TUTOR_CONFIG[request.subject]
     history_payload = [
-        {"role": message.role, "content": message.content}
-        for message in request.history[-12:]
+        {
+            "role": message.role,
+            "content": message.content[-4000:],
+        }
+        for message in request.history[-6:]
     ]
 
     return f"""
@@ -610,15 +639,18 @@ backslashes. If 3D would not help, return an object with an empty elements list.
 """.strip()
 
     try:
-        response = await ai_client.aio.models.generate_content(
-            model=model_name,
-            contents=scene_prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=Scene,
-                temperature=0.1,
-                max_output_tokens=4096,
+        response = await asyncio.wait_for(
+            ai_client.aio.models.generate_content(
+                model=model_name,
+                contents=scene_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=Scene,
+                    temperature=0.1,
+                    max_output_tokens=2048,
+                ),
             ),
+            timeout=SCENE_CALL_TIMEOUT_SECONDS,
         )
 
         if isinstance(response.parsed, Scene):
@@ -693,47 +725,62 @@ async def chat_endpoint(request: ChatRequest, raw_request: Request) -> TutorResp
     prompt = build_prompt(request)
     last_error: Exception | None = None
 
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + ENDPOINT_TIMEOUT_SECONDS
+
     for model_name in MODEL_NAMES:
-        for attempt in range(2):
-            try:
-                response = await generate_main_response(model_name, prompt)
-                raw_text = response.text or ""
+        remaining_seconds = deadline - loop.time()
+        if remaining_seconds <= 1:
+            break
 
-                if not raw_text.strip():
-                    raise RuntimeError("Gemini returned an empty text response")
+        try:
+            response = await asyncio.wait_for(
+                generate_main_response(model_name, prompt),
+                timeout=min(GEMINI_CALL_TIMEOUT_SECONDS, remaining_seconds),
+            )
+            raw_text = response.text or ""
 
-                explanation, scene, scene_status = extract_explanation_and_scene(raw_text)
+            if not raw_text.strip():
+                raise RuntimeError("Gemini returned an empty text response")
 
-                if not explanation.strip():
-                    explanation = "The explanation could not be generated completely. Please retry."
+            explanation, scene, scene_status = extract_explanation_and_scene(raw_text)
 
-                # If the main answer lost or malformed its scene block, make one
-                # isolated structured-output retry. LaTeX remains outside this JSON.
-                if scene is None and scene_status in {"missing", "invalid"}:
-                    scene = await generate_scene_fallback(
-                        model_name,
-                        request,
-                        explanation,
-                    )
+            if not explanation.strip():
+                explanation = "The explanation could not be generated completely. Please retry."
 
-                result = TutorResponse(
-                    explanation=explanation,
-                    scene=scene,
-                    tutor=tutor["name"],
-                    subject=request.subject,
-                    mode=request.mode,
+            # If the main answer lost or malformed its scene block, make one
+            # short isolated structured-output retry. A failure here never
+            # prevents the text explanation from being returned.
+            remaining_seconds = deadline - loop.time()
+            if (
+                scene is None
+                and scene_status in {"missing", "invalid"}
+                and remaining_seconds > 2
+            ):
+                scene = await generate_scene_fallback(
+                    model_name,
+                    request,
+                    explanation,
                 )
 
-                set_to_cache(cache_key, result.model_dump(mode="json"))
-                return result
+            result = TutorResponse(
+                explanation=explanation,
+                scene=scene,
+                tutor=tutor["name"],
+                subject=request.subject,
+                mode=request.mode,
+            )
 
-            except Exception as error:
-                last_error = error
-                if attempt == 0:
-                    await asyncio.sleep(0.5)
+            set_to_cache(cache_key, result.model_dump(mode="json"))
+            return result
+
+        except (TimeoutError, asyncio.TimeoutError) as error:
+            last_error = RuntimeError(f"{model_name} timed out")
+        except Exception as error:
+            last_error = error
 
     raise HTTPException(
-        status_code=502,
+        status_code=504 if "timed out" in str(last_error).lower() else 502,
         detail=f"AI generation failed: {last_error}",
     )
 
