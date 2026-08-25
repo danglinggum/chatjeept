@@ -53,36 +53,22 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
-// Broken/chained math syntax repair engine
+// Safe math normalizer without corrupting surrounding English text
 function normalizeMath(text: string): string {
+  if (!text) return "";
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
 
-  // 1. Convert \[ \] and \( \) to standard $ / $$
-  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n$$\n${math.trim()}\n$$\n`);
+  // 1. Standardize bracket math to dollar signs
+  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n\n$$\n${math.trim()}\n$$\n\n`);
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`);
 
-  // 2. Fix cases missing opening \begin{cases}
-  clean = clean.replace(/^([^$\n]*?)\\\\?\s*([^$\n]*?)\\end\{cases\}/gm, (match) => {
-    if (!match.includes("\\begin{cases}")) {
-      return `\\begin{cases} ${match}`;
-    }
-    return match;
-  });
+  // 2. Ensure cases environment is wrapped in block $$
+  clean = clean.replace(/(?<!\$\$)\s*(\\begin\{cases\}[\s\S]*?\\end\{cases\})\s*(?!\$\$)/g, (m, c) => `\n\n$$\n${c.trim()}\n$$\n\n`);
 
-  // 3. Fix chained equations like: expr1$expr2$expr3 -> separate into new lines
-  clean = clean.replace(/([^\n$]+)\$([^\n$]+)\$([^\n$]+)/g, (_, p1, p2, p3) => {
-    return `\n$$${p1.trim()}$$\n$$${p2.trim()}$$\n$$${p3.trim()}$$\n`;
-  });
-
-  // 4. Strip stray unescaped macros outside math
-  clean = clean.replace(/(?<!\$)\\text\{([^}]+)\}(?!\$)/g, "$1");
-  clean = clean.replace(/(?<!\$)\\quad(?!\$)/g, " ");
-  clean = clean.replace(/(?<!\$)\\,(?!\$)/g, " ");
-  clean = clean.replace(/(?<!\$)\\%(?!\$)/g, "%");
-
-  // 5. Clean duplicate $$
-  clean = clean.replace(/\$\$\s*\$\$/g, "$$");
-  clean = clean.replace(/\{(\$\$|\$)(.*?)\1\}/g, "{$2}");
+  // 3. Add proper spacing around inline math stuck to text (e.g. mass$m$and -> mass $m$ and)
+  clean = clean.replace(/([a-zA-Z0-9])\$([^\$\n]+)\$([a-zA-Z0-9])/g, "$1 $$2$ $3");
+  clean = clean.replace(/([a-zA-Z0-9])\$([^\$\n]+)\$/g, "$1 $$2$");
+  clean = clean.replace(/\$([^\$\n]+)\$([a-zA-Z0-9])/g, "$$1$ $2");
 
   return clean;
 }
@@ -139,7 +125,7 @@ function SceneRenderer({ scene }: { scene: Scene }) {
   return (
     <div className="w-full h-84 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
       <div className="absolute top-3 left-3 z-10 bg-slate-900/90 border border-slate-700/80 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300 shadow">
-        🎮 3D Physics Vector Setup (Drag to Rotate / Scroll to Zoom)
+        🎮 3D Spatial Vector Setup (Drag to Rotate / Scroll to Zoom)
       </div>
       <ThreeCanvas camera={{ position: [3, 2, 5], fov: 48 }}>
         <ambientLight intensity={1.5} />
@@ -371,7 +357,6 @@ export default function ChatJEEPTPage() {
                         {
                           throwOnError: false,
                           strict: false,
-                          errorColor: "#f87171",
                         },
                       ],
                     ]}

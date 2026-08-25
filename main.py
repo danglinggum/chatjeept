@@ -33,7 +33,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client & Model Pool
+# Google GenAI Client & Resilient Model Pool
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -43,8 +43,8 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
 MODELS_TO_TRY = [
-    "gemini-3.6-flash",
     "gemini-2.5-flash",
+    "gemini-2.5-pro",
 ]
 
 # =============================================================================
@@ -112,43 +112,40 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
 
 # =============================================================================
-# FastAPI Core App
+# FastAPI Core App & Open CORS
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="8.7.0")
-
-ALLOWED_ORIGINS = [
-    "https://chatjeept-iota.vercel.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+app = FastAPI(title="ChatJEEPT API", version="8.9.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Communicate STRICTLY in English with rigorous mathematical precision.
+Communicate STRICTLY in English with flawless mathematical precision.
 
-CRITICAL LATEX & EQUATION RULES:
-1. NEVER chain equations with single dollar signs (BAD: `m\\ddot{x} = a$m\\ddot{y} = b$m\\ddot{z} = c`).
-2. Place EVERY standalone mathematical equation on its OWN SEPARATE LINE using double dollar signs:
+CRITICAL MATHEMATICAL FORMATTING RULES:
+1. Write all ordinary explanatory sentences in standard English markdown. NEVER put English words or sentences inside `$ ... $` or `$$ ... $$`.
+2. Always put spaces around inline math variables:
+   - CORRECT: "A particle of mass $m$ and positive charge $q$ is released at $t = 0$."
+   - INCORRECT: "A particle of mass$m$and positive charge $$qis released...$$"
+3. Put every standalone derivation or multi-line formula in BLOCK math using `$$` on its OWN separate line:
    $$m\\ddot{x} = q B_0 \\dot{y}$$
    $$m\\ddot{y} = q E_0 - q B_0 \\dot{x}$$
    $$m\\ddot{z} = 0$$
-3. For piecewise or system of equations, ALWAYS include BOTH `\\begin{cases}` and `\\end{cases}`:
+4. For systems of equations, always format cleanly using cases blocks:
    $$\\begin{cases} x(t) = \\dfrac{m E_0}{q B_0^2}(\\omega t - \\sin\\omega t) \\\\[8pt] y(t) = \\dfrac{m E_0}{q B_0^2}(1 - \\cos\\omega t) \\\\[8pt] z(t) = 0 \\end{cases}$$
-4. Use single dollar signs ONLY for inline variables/units: e.g. `$q$`, `$\\omega = \\frac{q B_0}{m}$`, `$t = 0$`.
+5. NEVER concatenate multiple dollar signs back-to-back without spaces.
 
 CRITICAL 3D VISUALIZATION DIRECTIVES:
 1. NEVER describe the 3D scene in paragraph text.
-2. ALWAYS append the actual 3D scene JSON using `<<<3D_SCENE>>>` and `<<<END_3D_SCENE>>>`.
-3. ONLY use: "sphere", "cylinder", "arrow".
+2. ALWAYS append the actual 3D scene JSON at the end using `<<<3D_SCENE>>>` and `<<<END_3D_SCENE>>>`.
+3. ONLY use allowed kinds: "sphere", "cylinder", "arrow".
 
 Output format:
 [Your complete, exhaustive explanation in English here]
@@ -209,7 +206,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v8.7"}
+    return {"status": "online", "service": "ChatJEEPT API v8.9"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
