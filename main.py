@@ -33,7 +33,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client
+# Google GenAI Client & Resilient Model Pool
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -42,7 +42,11 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-MODELS_TO_TRY = ["gemini-3.6-flash"]
+# 주 모델 과부하시 예비 모델로 순차 전환
+MODELS_TO_TRY = [
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
+]
 
 # =============================================================================
 # Models & Configuration
@@ -112,7 +116,7 @@ class ChatRequest(BaseModel):
 # FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="8.4.0")
+app = FastAPI(title="ChatJEEPT API", version="8.5.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -200,7 +204,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v8.4"}
+    return {"status": "online", "service": "ChatJEEPT API v8.5"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
@@ -219,15 +223,24 @@ async def chat_endpoint(request: ChatRequest, req: Request):
 
     last_err = None
     for model_name in MODELS_TO_TRY:
-        try:
-            res = await asyncio.to_thread(generate_ai, model_name, prompt)
-            raw = res.text or ""
-            if raw.strip():
-                exp, sc = extract_explanation_and_scene(raw)
-                return TutorResponse(explanation=exp, scene=sc, tutor=tutor["name"], subject=request.subject, mode=request.mode)
-        except Exception as e:
-            last_err = e
-            continue
+        # 모델당 최대 2회 재시도 (503 / 순간 지연 완화)
+        for attempt in range(2):
+            try:
+                res = await asyncio.to_thread(generate_ai, model_name, prompt)
+                raw = res.text or ""
+                if raw.strip():
+                    exp, sc = extract_explanation_and_scene(raw)
+                    return TutorResponse(
+                        explanation=exp,
+                        scene=sc,
+                        tutor=tutor["name"],
+                        subject=request.subject,
+                        mode=request.mode
+                    )
+            except Exception as e:
+                last_err = e
+                await asyncio.sleep(1.0)
+                continue
 
     raise HTTPException(status_code=500, detail=f"AI generation failed: {str(last_err)}")
 
