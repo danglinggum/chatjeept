@@ -42,7 +42,6 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-# 주 모델 과부하시 예비 모델로 순차 전환
 MODELS_TO_TRY = [
     "gemini-3.6-flash",
     "gemini-2.5-flash",
@@ -116,7 +115,7 @@ class ChatRequest(BaseModel):
 # FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="8.5.0")
+app = FastAPI(title="ChatJEEPT API", version="8.6.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -134,25 +133,30 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-You MUST communicate STRICTLY in English with rigorous academic precision.
+Communicate STRICTLY in English with rigorous mathematical precision.
 
-CRITICAL FORMATTING RULES:
-1. ALWAYS output your complete explanation in English.
-2. NEVER output raw LaTeX commands like \\text{}, \\,, or \\% in plain prose or bullet points.
-   - Example: * **Equatorial orbitals** ($sp^2$): 33.3% $s$-character, 66.7% $p$-character
-3. Wrap ONLY actual formulas/chemical symbols in single dollar signs: `$sp^3d$`, `$\\text{SF}_4$`, `$120^\\circ$`.
-4. Wrap standalone equations in double dollar signs: `$$ ... $$`.
+CRITICAL 3D VISUALIZATION DIRECTIVES:
+1. NEVER describe the 3D scene in paragraph text (e.g. NEVER write "The 3D visualization below displays...").
+2. YOU MUST ALWAYS append the actual 3D scene JSON using the exact delimiters `<<<3D_SCENE>>>` and `<<<END_3D_SCENE>>>`.
+3. ONLY use these 3 element kinds: "sphere", "cylinder", "arrow". Do NOT use "ring", "line", or custom types.
+   - For a circular hoop: represent the rotation axis as a vertical cylinder, and place 8-12 small guide spheres or cylinder segments along the ring.
+   - For forces/vectors: use "arrow" elements with "start" and "end" 3D coordinates.
+   - For masses/beads/atoms: use "sphere" elements.
 
-CRITICAL 3D VISUALIZATION DIRECTIVE:
-Whenever spatial geometry, molecules, vectors, planes, or 3D forces are discussed, ALWAYS generate a 3D scene at the very end.
-If comparing multiple molecules (e.g. SF4 and ClF3), place Molecule 1 at x = -2.5 and Molecule 2 at x = +2.5.
+CRITICAL MATH RULES:
+1. Wrap ALL formulas cleanly in single dollar signs: e.g. `$\\theta_1 = 0$`, `$\\omega_c = \\sqrt{g/R}$`.
+2. Standalone derivation blocks in `$$ ... $$`.
 
-Output format:
-[Your complete, exhaustive explanation in English here]
-
+Example 3D payload for rotating wire loop / forces:
 <<<3D_SCENE>>>
 {
-  "elements": [ ... ]
+  "elements": [
+    {"kind": "cylinder", "start": [0, -2.5, 0], "end": [0, 2.5, 0], "color": "#64748b"},
+    {"kind": "sphere", "position": [1.41, 0, 1.41], "radius": 0.28, "color": "#f97316", "label": "Bead"},
+    {"kind": "arrow", "start": [1.41, 0, 1.41], "end": [1.41, -1.2, 1.41], "color": "#ef4444", "label": "Fg"},
+    {"kind": "arrow", "start": [1.41, 0, 1.41], "end": [2.6, 0, 1.41], "color": "#3b82f6", "label": "Fcf"},
+    {"kind": "arrow", "start": [1.41, 0, 1.41], "end": [0, 0, 0], "color": "#10b981", "label": "N"}
+  ]
 }
 <<<END_3D_SCENE>>>
 """.strip()
@@ -181,13 +185,15 @@ def extract_explanation_and_scene(raw_text: str) -> tuple[str, Scene | None]:
     scene_part = parts[1].split(SCENE_END_MARKER)[0].strip() if SCENE_END_MARKER in parts[1] else parts[1].strip()
     parsed = parse_json_defensively(scene_part)
     scene = None
-    if isinstance(parsed, dict) and "elements" in parsed:
-        try:
-            valid_elements = [scene_element_adapter.validate_python(el) for el in parsed["elements"]]
-            if len(valid_elements) > 0:
-                scene = Scene(elements=valid_elements)
-        except Exception:
-            scene = None
+    if isinstance(parsed, dict) and "elements" in parsed and isinstance(parsed["elements"], list):
+        valid_elements = []
+        for el in parsed["elements"]:
+            try:
+                valid_elements.append(scene_element_adapter.validate_python(el))
+            except Exception:
+                continue
+        if len(valid_elements) > 0:
+            scene = Scene(elements=valid_elements)
     return explanation, scene
 
 def generate_ai(model_name: str, prompt: str):
@@ -196,7 +202,7 @@ def generate_ai(model_name: str, prompt: str):
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.2,
+            temperature=0.3,
             max_output_tokens=8192,
         ),
     )
@@ -204,7 +210,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v8.5"}
+    return {"status": "online", "service": "ChatJEEPT API v8.6"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
@@ -223,8 +229,7 @@ async def chat_endpoint(request: ChatRequest, req: Request):
 
     last_err = None
     for model_name in MODELS_TO_TRY:
-        # 모델당 최대 2회 재시도 (503 / 순간 지연 완화)
-        for attempt in range(2):
+        for _ in range(2):
             try:
                 res = await asyncio.to_thread(generate_ai, model_name, prompt)
                 raw = res.text or ""

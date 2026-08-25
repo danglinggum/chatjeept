@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
+import * as THREE from "three";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -55,67 +56,100 @@ const BACKEND_URL = resolveBackendUrl();
 function normalizeMath(text: string): string {
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
 
-  // 1. Standardize bracket math to dollar signs
+  // 1. Standardize bracket/parenthesis math delimiters
   clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$$${math}$$`);
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math}$`);
 
-  // 2. Clean unescaped raw LaTeX commands outside math tags
+  // 2. Clean unescaped LaTeX tags
   clean = clean.replace(/(?<!\$)\\text\{([^}]+)\}(?!\$)/g, "$1");
   clean = clean.replace(/(?<!\$)\\quad(?!\$)/g, " ");
   clean = clean.replace(/(?<!\$)\\,(?!\$)/g, " ");
   clean = clean.replace(/(?<!\$)\\%(?!\$)/g, "%");
 
-  // 3. Fix nested/duplicated math delimiters
+  // 3. Fix unclosed or duplicated tags
   clean = clean.replace(/\$\$\s*\$\$/g, "$$");
   clean = clean.replace(/\{(\$\$|\$)(.*?)\1\}/g, "{$2}");
 
   return clean;
 }
 
+// 3D Cylinder with correct orientation between two points
+function CylinderSegment({ start, end, color }: { start: [number, number, number]; end: [number, number, number]; color?: string }) {
+  const p1 = new THREE.Vector3(...start);
+  const p2 = new THREE.Vector3(...end);
+  const length = p1.distanceTo(p2);
+  if (length < 0.001) return null;
+
+  const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+  const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
+  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+
+  return (
+    <mesh position={mid} quaternion={quat}>
+      <cylinderGeometry args={[0.06, 0.06, length, 16]} />
+      <meshStandardMaterial color={color || "#94a3b8"} roughness={0.4} />
+    </mesh>
+  );
+}
+
+// 3D Vector Arrow with shaft and cone tip
+function VectorArrow({ start, end, color }: { start: [number, number, number]; end: [number, number, number]; color?: string }) {
+  const p1 = new THREE.Vector3(...start);
+  const p2 = new THREE.Vector3(...end);
+  const totalLen = p1.distanceTo(p2);
+  if (totalLen < 0.001) return null;
+
+  const coneLen = Math.min(0.4, totalLen * 0.35);
+  const shaftLen = totalLen - coneLen;
+  const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
+  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+
+  const shaftMid = new THREE.Vector3().copy(p1).addScaledVector(dir, shaftLen * 0.5);
+  const tipPos = new THREE.Vector3().copy(p1).addScaledVector(dir, shaftLen + coneLen * 0.5);
+
+  return (
+    <group>
+      <mesh position={shaftMid} quaternion={quat}>
+        <cylinderGeometry args={[0.05, 0.05, shaftLen, 16]} />
+        <meshStandardMaterial color={color || "#f97316"} />
+      </mesh>
+      <mesh position={tipPos} quaternion={quat}>
+        <coneGeometry args={[0.13, coneLen, 16]} />
+        <meshStandardMaterial color={color || "#f97316"} />
+      </mesh>
+    </group>
+  );
+}
+
 function SceneRenderer({ scene }: { scene: Scene }) {
   if (!scene || !scene.elements || scene.elements.length === 0) return null;
 
   return (
-    <div className="w-full h-80 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
+    <div className="w-full h-84 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
       <div className="absolute top-3 left-3 z-10 bg-slate-900/90 border border-slate-700/80 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300 shadow">
-        🎮 3D Spatial Model (Drag to Rotate / Scroll to Zoom)
+        🎮 3D Physics Vector Setup (Drag to Rotate / Scroll to Zoom)
       </div>
-      <ThreeCanvas camera={{ position: [0, 2, 7], fov: 50 }}>
+      <ThreeCanvas camera={{ position: [3, 2, 5], fov: 48 }}>
         <ambientLight intensity={1.5} />
         <pointLight position={[10, 10, 10]} intensity={1.5} />
         <directionalLight position={[-5, 5, 5]} intensity={0.8} />
         <OrbitControls makeDefault />
-        <gridHelper args={[12, 12, "#334155", "#1e293b"]} position={[0, -1.5, 0]} />
+        <gridHelper args={[10, 10, "#334155", "#1e293b"]} position={[0, -2, 0]} />
 
         {scene.elements.map((el, idx) => {
           if (el.kind === "sphere" && el.position) {
             return (
               <mesh key={idx} position={el.position}>
-                <sphereGeometry args={[el.radius || 0.35, 32, 32]} />
+                <sphereGeometry args={[el.radius || 0.3, 32, 32]} />
                 <meshStandardMaterial color={el.color || "#60a5fa"} roughness={0.3} metalness={0.2} />
               </mesh>
             );
           }
           if (el.kind === "cylinder" && el.start && el.end) {
-            const mid: [number, number, number] = [
-              (el.start[0] + el.end[0]) / 2,
-              (el.start[1] + el.end[1]) / 2,
-              (el.start[2] + el.end[2]) / 2,
-            ];
-            return (
-              <mesh key={idx} position={mid}>
-                <cylinderGeometry args={[0.07, 0.07, 1.4, 16]} />
-                <meshStandardMaterial color={el.color || "#94a3b8"} roughness={0.4} />
-              </mesh>
-            );
+            return <CylinderSegment key={idx} start={el.start} end={el.end} color={el.color} />;
           }
           if (el.kind === "arrow" && el.start && el.end) {
-            return (
-              <mesh key={idx} position={el.start}>
-                <sphereGeometry args={[0.15, 16, 16]} />
-                <meshStandardMaterial color={el.color || "#f97316"} />
-              </mesh>
-            );
+            return <VectorArrow key={idx} start={el.start} end={el.end} color={el.color} />;
           }
           return null;
         })}
@@ -125,7 +159,7 @@ function SceneRenderer({ scene }: { scene: Scene }) {
 }
 
 export default function ChatJEEPTPage() {
-  const [subject, setSubject] = useState<Subject>("Chemistry");
+  const [subject, setSubject] = useState<Subject>("Physics");
   const [mode, setMode] = useState<TutorMode>("Full Solution");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -351,7 +385,7 @@ export default function ChatJEEPTPage() {
 
         {loading && (
           <div className="flex items-center gap-3 text-xs font-mono text-cyan-400 bg-slate-900/60 border border-slate-800/80 px-4 py-3 rounded-2xl w-fit">
-            <span className="animate-spin">⚙️</span> Analyzing question and generating 3D setup...
+            <span className="animate-spin">⚙️</span> Calculating derivations and generating 3D setup...
           </div>
         )}
         <div ref={chatEndRef} />
