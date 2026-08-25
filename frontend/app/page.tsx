@@ -52,18 +52,15 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
-// 모든 변종 LaTeX 문법(\( \), \[, unescaped \text)을 표준 $...$ 로 정규화
 function normalizeMath(text: string): string {
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
   // \[ ... \] -> $$ ... $$
   clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$$${math}$$`);
   // \( ... \) -> $ ... $
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math}$`);
-  // $ 없이 노출된 \text{...} 수식 감싸기
-  clean = clean.replace(/(?<!\$)\\text\{[^\}]+\}(?:_[0-9a-zA-Z\^\{\}]+)?(?!\$)/g, (m) => `$${m}$`);
-  // $ 없이 노출된 sp^3, 90^\circ 감싸기
-  clean = clean.replace(/(?<!\$)\b(sp\^[0-9a-zA-Z\^\{\}]+)(?!\$)/gi, (m) => `$${m}$`);
-  clean = clean.replace(/(?<!\$)([0-9]+\^\\circ)(?!\$)/g, (m) => `$${m}$`);
+  // 중복 생성된 $$ 정리 ($$ 안에 또 $$ 가 들어가는 버그 방지)
+  clean = clean.replace(/\$\$\s*\$\$/g, "$$");
+  clean = clean.replace(/\{(\$\$|\$)(.*?)\1\}/g, "{$2}");
   return clean;
 }
 
@@ -73,14 +70,14 @@ function SceneRenderer({ scene }: { scene: Scene }) {
   return (
     <div className="w-full h-80 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
       <div className="absolute top-3 left-3 z-10 bg-slate-900/90 border border-slate-700/80 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300 shadow">
-        🎮 Interactive 3D Model (Drag to Rotate / Scroll to Zoom)
+        🎮 3D Spatial Model (Drag to Rotate / Scroll to Zoom)
       </div>
-      <ThreeCanvas camera={{ position: [0, 2, 6], fov: 50 }}>
+      <ThreeCanvas camera={{ position: [0, 2, 7], fov: 50 }}>
         <ambientLight intensity={1.5} />
         <pointLight position={[10, 10, 10]} intensity={1.5} />
         <directionalLight position={[-5, 5, 5]} intensity={0.8} />
         <OrbitControls makeDefault />
-        <gridHelper args={[10, 10, "#334155", "#1e293b"]} position={[0, -1.2, 0]} />
+        <gridHelper args={[12, 12, "#334155", "#1e293b"]} position={[0, -1.5, 0]} />
 
         {scene.elements.map((el, idx) => {
           if (el.kind === "sphere" && el.position) {
