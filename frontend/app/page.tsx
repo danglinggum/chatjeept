@@ -53,27 +53,40 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
+// Broken/chained math syntax repair engine
 function normalizeMath(text: string): string {
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
 
-  // 1. Standardize bracket/parenthesis math delimiters
-  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$$${math}$$`);
-  clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math}$`);
+  // 1. Convert \[ \] and \( \) to standard $ / $$
+  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n$$\n${math.trim()}\n$$\n`);
+  clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`);
 
-  // 2. Clean unescaped LaTeX tags
+  // 2. Fix cases missing opening \begin{cases}
+  clean = clean.replace(/^([^$\n]*?)\\\\?\s*([^$\n]*?)\\end\{cases\}/gm, (match) => {
+    if (!match.includes("\\begin{cases}")) {
+      return `\\begin{cases} ${match}`;
+    }
+    return match;
+  });
+
+  // 3. Fix chained equations like: expr1$expr2$expr3 -> separate into new lines
+  clean = clean.replace(/([^\n$]+)\$([^\n$]+)\$([^\n$]+)/g, (_, p1, p2, p3) => {
+    return `\n$$${p1.trim()}$$\n$$${p2.trim()}$$\n$$${p3.trim()}$$\n`;
+  });
+
+  // 4. Strip stray unescaped macros outside math
   clean = clean.replace(/(?<!\$)\\text\{([^}]+)\}(?!\$)/g, "$1");
   clean = clean.replace(/(?<!\$)\\quad(?!\$)/g, " ");
   clean = clean.replace(/(?<!\$)\\,(?!\$)/g, " ");
   clean = clean.replace(/(?<!\$)\\%(?!\$)/g, "%");
 
-  // 3. Fix unclosed or duplicated tags
+  // 5. Clean duplicate $$
   clean = clean.replace(/\$\$\s*\$\$/g, "$$");
   clean = clean.replace(/\{(\$\$|\$)(.*?)\1\}/g, "{$2}");
 
   return clean;
 }
 
-// 3D Cylinder with correct orientation between two points
 function CylinderSegment({ start, end, color }: { start: [number, number, number]; end: [number, number, number]; color?: string }) {
   const p1 = new THREE.Vector3(...start);
   const p2 = new THREE.Vector3(...end);
@@ -92,7 +105,6 @@ function CylinderSegment({ start, end, color }: { start: [number, number, number
   );
 }
 
-// 3D Vector Arrow with shaft and cone tip
 function VectorArrow({ start, end, color }: { start: [number, number, number]; end: [number, number, number]; color?: string }) {
   const p1 = new THREE.Vector3(...start);
   const p2 = new THREE.Vector3(...end);
@@ -353,7 +365,16 @@ export default function ChatJEEPTPage() {
                 <div className="space-y-3 leading-relaxed text-sm text-slate-200">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkMath]}
-                    rehypePlugins={[rehypeKatex]}
+                    rehypePlugins={[
+                      [
+                        rehypeKatex,
+                        {
+                          throwOnError: false,
+                          strict: false,
+                          errorColor: "#f87171",
+                        },
+                      ],
+                    ]}
                     components={{
                       table: ({ ...props }) => (
                         <div className="overflow-x-auto my-4 rounded-xl border border-slate-800 bg-slate-950/80 shadow-md">

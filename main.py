@@ -33,7 +33,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# Google GenAI Client & Resilient Model Pool
+# Google GenAI Client & Model Pool
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -115,7 +115,7 @@ class ChatRequest(BaseModel):
 # FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="8.6.0")
+app = FastAPI(title="ChatJEEPT API", version="8.7.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -135,28 +135,27 @@ SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
 Communicate STRICTLY in English with rigorous mathematical precision.
 
+CRITICAL LATEX & EQUATION RULES:
+1. NEVER chain equations with single dollar signs (BAD: `m\\ddot{x} = a$m\\ddot{y} = b$m\\ddot{z} = c`).
+2. Place EVERY standalone mathematical equation on its OWN SEPARATE LINE using double dollar signs:
+   $$m\\ddot{x} = q B_0 \\dot{y}$$
+   $$m\\ddot{y} = q E_0 - q B_0 \\dot{x}$$
+   $$m\\ddot{z} = 0$$
+3. For piecewise or system of equations, ALWAYS include BOTH `\\begin{cases}` and `\\end{cases}`:
+   $$\\begin{cases} x(t) = \\dfrac{m E_0}{q B_0^2}(\\omega t - \\sin\\omega t) \\\\[8pt] y(t) = \\dfrac{m E_0}{q B_0^2}(1 - \\cos\\omega t) \\\\[8pt] z(t) = 0 \\end{cases}$$
+4. Use single dollar signs ONLY for inline variables/units: e.g. `$q$`, `$\\omega = \\frac{q B_0}{m}$`, `$t = 0$`.
+
 CRITICAL 3D VISUALIZATION DIRECTIVES:
-1. NEVER describe the 3D scene in paragraph text (e.g. NEVER write "The 3D visualization below displays...").
-2. YOU MUST ALWAYS append the actual 3D scene JSON using the exact delimiters `<<<3D_SCENE>>>` and `<<<END_3D_SCENE>>>`.
-3. ONLY use these 3 element kinds: "sphere", "cylinder", "arrow". Do NOT use "ring", "line", or custom types.
-   - For a circular hoop: represent the rotation axis as a vertical cylinder, and place 8-12 small guide spheres or cylinder segments along the ring.
-   - For forces/vectors: use "arrow" elements with "start" and "end" 3D coordinates.
-   - For masses/beads/atoms: use "sphere" elements.
+1. NEVER describe the 3D scene in paragraph text.
+2. ALWAYS append the actual 3D scene JSON using `<<<3D_SCENE>>>` and `<<<END_3D_SCENE>>>`.
+3. ONLY use: "sphere", "cylinder", "arrow".
 
-CRITICAL MATH RULES:
-1. Wrap ALL formulas cleanly in single dollar signs: e.g. `$\\theta_1 = 0$`, `$\\omega_c = \\sqrt{g/R}$`.
-2. Standalone derivation blocks in `$$ ... $$`.
+Output format:
+[Your complete, exhaustive explanation in English here]
 
-Example 3D payload for rotating wire loop / forces:
 <<<3D_SCENE>>>
 {
-  "elements": [
-    {"kind": "cylinder", "start": [0, -2.5, 0], "end": [0, 2.5, 0], "color": "#64748b"},
-    {"kind": "sphere", "position": [1.41, 0, 1.41], "radius": 0.28, "color": "#f97316", "label": "Bead"},
-    {"kind": "arrow", "start": [1.41, 0, 1.41], "end": [1.41, -1.2, 1.41], "color": "#ef4444", "label": "Fg"},
-    {"kind": "arrow", "start": [1.41, 0, 1.41], "end": [2.6, 0, 1.41], "color": "#3b82f6", "label": "Fcf"},
-    {"kind": "arrow", "start": [1.41, 0, 1.41], "end": [0, 0, 0], "color": "#10b981", "label": "N"}
-  ]
+  "elements": [ ... ]
 }
 <<<END_3D_SCENE>>>
 """.strip()
@@ -202,7 +201,7 @@ def generate_ai(model_name: str, prompt: str):
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.3,
+            temperature=0.2,
             max_output_tokens=8192,
         ),
     )
@@ -210,7 +209,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v8.6"}
+    return {"status": "online", "service": "ChatJEEPT API v8.7"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
