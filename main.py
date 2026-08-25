@@ -26,25 +26,46 @@ load_dotenv()
 # Configuration
 # =============================================================================
 
-PROMPT_VERSION = "10.0"
+PROMPT_VERSION = "10.2"
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
 SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-MODEL_NAMES = [
-    name.strip()
-    for name in os.getenv(
-        "GEMINI_MODELS",
-        "gemini-3.6-flash,gemini-3.5-flash",
-    ).split(",")
-    if name.strip()
-]
-MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "6144"))
+DEFAULT_MODEL_NAMES = (
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+)
+configured_model_names = os.getenv("GEMINI_MODELS", "").split(",")
+MODEL_NAMES = list(
+    dict.fromkeys(
+        name.strip()
+        for name in (*DEFAULT_MODEL_NAMES, *configured_model_names)
+        if name.strip()
+    )
+)
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "4096"))
 MAX_REFERENCE_CHARACTERS = int(os.getenv("MAX_REFERENCE_CHARACTERS", "12000"))
-GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "30000"))
-GEMINI_CALL_TIMEOUT_SECONDS = float(os.getenv("GEMINI_CALL_TIMEOUT_SECONDS", "28"))
-SCENE_CALL_TIMEOUT_SECONDS = float(os.getenv("SCENE_CALL_TIMEOUT_SECONDS", "10"))
-ENDPOINT_TIMEOUT_SECONDS = float(os.getenv("ENDPOINT_TIMEOUT_SECONDS", "48"))
+GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "20000"))
+GEMINI_CALL_TIMEOUT_SECONDS = float(os.getenv("GEMINI_CALL_TIMEOUT_SECONDS", "18"))
+MIN_MODEL_ATTEMPT_SECONDS = float(os.getenv("MIN_MODEL_ATTEMPT_SECONDS", "10"))
+SCENE_CALL_TIMEOUT_SECONDS = float(os.getenv("SCENE_CALL_TIMEOUT_SECONDS", "7"))
+ENDPOINT_TIMEOUT_SECONDS = float(os.getenv("ENDPOINT_TIMEOUT_SECONDS", "100"))
+
+CAPACITY_ERROR_MARKERS = (
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "RESOURCE_EXHAUSTED",
+    "UNAVAILABLE",
+    "HIGH DEMAND",
+    "OVERLOADED",
+    "DEADLINE_EXCEEDED",
+)
 
 def create_genai_client():
     if not GOOGLE_API_KEY:
@@ -62,6 +83,20 @@ def create_genai_client():
 
 
 ai_client = create_genai_client()
+
+
+def is_temporary_provider_error(error: Exception) -> bool:
+    """Return True for Gemini capacity, quota-spike, and transient errors."""
+    status_code = getattr(error, "status_code", None)
+    code = getattr(error, "code", None)
+
+    if status_code in {429, 500, 502, 503, 504}:
+        return True
+    if code in {429, 500, 502, 503, 504}:
+        return True
+
+    error_text = str(error).upper()
+    return any(marker in error_text for marker in CAPACITY_ERROR_MARKERS)
 
 
 # =============================================================================
@@ -690,7 +725,7 @@ def build_cache_key(request: ChatRequest) -> str:
 async def health() -> dict[str, Any]:
     return {
         "status": "online",
-        "service": "ChatJEEPT Turbo API v10.0",
+        "service": "ChatJEEPT Turbo API v10.2",
         "models": MODEL_NAMES,
         "commit": os.getenv("RENDER_GIT_COMMIT", "local"),
     }
@@ -724,19 +759,31 @@ async def chat_endpoint(request: ChatRequest, raw_request: Request) -> TutorResp
 
     prompt = build_prompt(request)
     last_error: Exception | None = None
+    failures: list[tuple[str, str]] = []
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + ENDPOINT_TIMEOUT_SECONDS
 
-    for model_name in MODEL_NAMES:
+    for model_index, model_name in enumerate(MODEL_NAMES):
         remaining_seconds = deadline - loop.time()
         if remaining_seconds <= 1:
             break
 
+        # Preserve a minimum attempt window for every remaining fallback. This
+        # prevents the first one or two slow models from consuming the entire
+        # endpoint deadline before a Flash-Lite model can be tried.
+        models_after_current = len(MODEL_NAMES) - model_index - 1
+        reserved_for_fallbacks = models_after_current * MIN_MODEL_ATTEMPT_SECONDS
+        available_for_current = max(
+            MIN_MODEL_ATTEMPT_SECONDS,
+            remaining_seconds - reserved_for_fallbacks,
+        )
+        model_timeout = min(GEMINI_CALL_TIMEOUT_SECONDS, available_for_current)
+
         try:
             response = await asyncio.wait_for(
                 generate_main_response(model_name, prompt),
-                timeout=min(GEMINI_CALL_TIMEOUT_SECONDS, remaining_seconds),
+                timeout=min(model_timeout, remaining_seconds),
             )
             raw_text = response.text or ""
 
@@ -776,8 +823,42 @@ async def chat_endpoint(request: ChatRequest, raw_request: Request) -> TutorResp
 
         except (TimeoutError, asyncio.TimeoutError) as error:
             last_error = RuntimeError(f"{model_name} timed out")
+            failures.append((model_name, "timeout"))
         except Exception as error:
             last_error = error
+            failure_kind = "temporary" if is_temporary_provider_error(error) else "other"
+            failures.append((model_name, failure_kind))
+
+            # A 503/429 is usually a short-lived, model-specific capacity spike.
+            # Move to the next model after a small stagger instead of failing the
+            # request or repeatedly hammering the same unavailable model.
+            remaining_seconds = deadline - loop.time()
+            if failure_kind == "temporary" and remaining_seconds > 2:
+                temporary_failure_count = sum(
+                    kind == "temporary" for _, kind in failures
+                )
+                await asyncio.sleep(min(0.4 * temporary_failure_count, 1.5))
+
+    if failures and all(kind == "temporary" for _, kind in failures):
+        attempted_models = ", ".join(model for model, _ in failures)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Gemini is temporarily busy. ChatJEEPT automatically tried "
+                f"these fallback models: {attempted_models}. "
+                "Please press Send again in 10-30 seconds."
+            ),
+        )
+
+    if failures and all(kind == "timeout" for _, kind in failures):
+        attempted_models = ", ".join(model for model, _ in failures)
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Gemini did not respond within the per-model limits. "
+                f"ChatJEEPT tried: {attempted_models}. Please send again."
+            ),
+        )
 
     raise HTTPException(
         status_code=504 if "timed out" in str(last_error).lower() else 502,
