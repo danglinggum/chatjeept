@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 load_dotenv()
 
 # =============================================================================
-# 1. Performance: In-Memory Response Caching (0.01s Instant Reply)
+# 1. Performance: In-Memory Response Caching
 # =============================================================================
 
 RESPONSE_CACHE: dict[str, dict[str, Any]] = {}
@@ -34,7 +34,7 @@ def set_to_cache(key: str, data: dict[str, Any]):
     RESPONSE_CACHE[key] = data
 
 # =============================================================================
-# 2. Security: Lightweight Rate Limiter
+# 2. Security: Rate Limiter
 # =============================================================================
 
 REQUEST_RECORDS = defaultdict(list)
@@ -49,7 +49,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# 3. Google GenAI Client & Verified Model
+# 3. Google GenAI Client
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -130,7 +130,7 @@ class ChatRequest(BaseModel):
 # 5. FastAPI App & Open CORS Policy
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT Turbo API", version="9.2.0")
+app = FastAPI(title="ChatJEEPT Turbo API", version="9.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -142,18 +142,22 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Deliver direct, mathematically rigorous solutions in English without conversational preamble.
+Deliver direct, mathematically rigorous solutions in English.
 
-FORMATTING RULES:
-1. Explain in markdown. NEVER put plain English prose inside LaTeX tags.
-2. Space inline math cleanly: "A mass $m$ with velocity $v$ at $t = 0$."
-3. Place major derivations on their own separate lines in double dollars:
-   $$m\\ddot{x} = q B_0 \\dot{y}$$
-4. Use standard cases block for piecewise formulas:
-   $$\\begin{cases} x(t) = \\dfrac{m E_0}{q B_0^2}(\\omega t - \\sin\\omega t) \\\\[6pt] y(t) = \\dfrac{m E_0}{q B_0^2}(1 - \\cos\\omega t) \\end{cases}$$
+CRITICAL LENGTH & STRUCTURE RULES:
+1. Provide clear, structured derivations without excessive conversational fluff so you NEVER run out of tokens.
+2. ALWAYS ensure the response reaches completion and finishes with the full 3D SCENE JSON.
 
-3D VISUALIZATION:
-Always append the 3D scene JSON at the very end using the delimiters. Do NOT write prose descriptions for the 3D model.
+CRITICAL LATEX RULES:
+1. Explain in markdown. NEVER put plain English words inside LaTeX tags.
+2. Put standalone formulas in double dollar blocks:
+   $$[\\text{Co}(\\text{en})_2\\text{Cl}_2]^+$$
+3. For multi-line math, use aligned or cases blocks and ALWAYS close them properly:
+   $$\\begin{aligned} \\hat{i}(\\vec{r}_1) &= \\vec{r}_2 \\\\ \\hat{i}(\\vec{r}_3) &= \\vec{r}_4 \\end{aligned}$$
+
+CRITICAL 3D VISUALIZATION:
+Always append the 3D scene JSON at the very end using the markers.
+When comparing two molecules (like trans vs cis), place structure 1 at x = -2.5 and structure 2 at x = +2.5.
 Only use kinds: "sphere", "cylinder", "arrow".
 
 <<<3D_SCENE>>>
@@ -205,14 +209,14 @@ def generate_ai(model_name: str, prompt: str):
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             temperature=0.1,
-            max_output_tokens=4096,
+            max_output_tokens=8192,  # 잘림 방지를 위해 최대 토큰 상한 8192로 확장
         ),
     )
 
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT Turbo API v9.2"}
+    return {"status": "online", "service": "ChatJEEPT Turbo API v9.3"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)

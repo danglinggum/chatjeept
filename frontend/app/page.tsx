@@ -53,19 +53,34 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
-// Safe math normalizer without corrupting surrounding English text
+// Truncated/broken math auto-repair engine
 function normalizeMath(text: string): string {
   if (!text) return "";
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
 
-  // 1. Standardize bracket math to dollar signs
+  // 1. Remove dangling unfinished LaTeX commands at the very end (e.g. $$\mathbf{\bar{ )
+  clean = clean.replace(/\$\$\s*\\[a-zA-Z]+\s*\{?[^$\n]*$/g, "");
+  clean = clean.replace(/\$\s*\\[a-zA-Z]+\s*\{?[^$\n]*$/g, "");
+
+  // 2. Standardize bracket math to dollar signs
   clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n\n$$\n${math.trim()}\n$$\n\n`);
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`);
 
-  // 2. Ensure cases environment is wrapped in block $$
-  clean = clean.replace(/(?<!\$\$)\s*(\\begin\{cases\}[\s\S]*?\\end\{cases\})\s*(?!\$\$)/g, (m, c) => `\n\n$$\n${c.trim()}\n$$\n\n`);
+  // 3. Ensure aligned and cases blocks are properly closed if cut off
+  if (clean.includes("\\begin{aligned}") && !clean.includes("\\end{aligned}")) {
+    clean += "\n\\end{aligned}\n$$";
+  }
+  if (clean.includes("\\begin{cases}") && !clean.includes("\\end{cases}")) {
+    clean += "\n\\end{cases}\n$$";
+  }
 
-  // 3. Add proper spacing around inline math stuck to text (e.g. mass$m$and -> mass $m$ and)
+  // 4. Auto-close single unclosed $$ at the end
+  const doubleDollarCount = (clean.match(/\$\$/g) || []).length;
+  if (doubleDollarCount % 2 !== 0) {
+    clean += "\n$$";
+  }
+
+  // 5. Space inline math cleanly
   clean = clean.replace(/([a-zA-Z0-9])\$([^\$\n]+)\$([a-zA-Z0-9])/g, "$1 $$2$ $3");
   clean = clean.replace(/([a-zA-Z0-9])\$([^\$\n]+)\$/g, "$1 $$2$");
   clean = clean.replace(/\$([^\$\n]+)\$([a-zA-Z0-9])/g, "$$1$ $2");
@@ -127,12 +142,12 @@ function SceneRenderer({ scene }: { scene: Scene }) {
       <div className="absolute top-3 left-3 z-10 bg-slate-900/90 border border-slate-700/80 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300 shadow">
         🎮 3D Spatial Vector Setup (Drag to Rotate / Scroll to Zoom)
       </div>
-      <ThreeCanvas camera={{ position: [3, 2, 5], fov: 48 }}>
+      <ThreeCanvas camera={{ position: [0, 3, 7], fov: 48 }}>
         <ambientLight intensity={1.5} />
         <pointLight position={[10, 10, 10]} intensity={1.5} />
         <directionalLight position={[-5, 5, 5]} intensity={0.8} />
         <OrbitControls makeDefault />
-        <gridHelper args={[10, 10, "#334155", "#1e293b"]} position={[0, -2, 0]} />
+        <gridHelper args={[12, 12, "#334155", "#1e293b"]} position={[0, -2, 0]} />
 
         {scene.elements.map((el, idx) => {
           if (el.kind === "sphere" && el.position) {
@@ -157,7 +172,7 @@ function SceneRenderer({ scene }: { scene: Scene }) {
 }
 
 export default function ChatJEEPTPage() {
-  const [subject, setSubject] = useState<Subject>("Physics");
+  const [subject, setSubject] = useState<Subject>("Chemistry");
   const [mode, setMode] = useState<TutorMode>("Full Solution");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
