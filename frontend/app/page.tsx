@@ -36,9 +36,9 @@ interface Message {
 }
 
 const TUTOR_INFO: Record<Subject, { name: string; institute: string; spec: string }> = {
-  Physics: { name: "Rahul", institute: "IIT Bombay", spec: "Mechanics · E&M · 3D Vectors" },
-  Chemistry: { name: "Raj", institute: "IIT Delhi", spec: "VSEPR Geometry · Bonding · Organic" },
-  Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors" },
+  Physics: { name: "Rahul", institute: "IIT Bombay", spec: "Mechanics · Electromagnetism · 3D Vectors" },
+  Chemistry: { name: "Raj", institute: "IIT Delhi", spec: "VSEPR Geometry · Chemical Bonding · Organic Mechanisms" },
+  Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors · Matrices" },
 };
 
 function resolveBackendUrl(): string {
@@ -52,21 +52,20 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
-// 노출된 raw LaTeX 문법을 완전히 복구하여 깔끔한 텍스트/수식으로 변환
 function normalizeMath(text: string): string {
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
 
-  // 1. 대괄호/소괄호 수식 표준화
+  // 1. Standardize bracket math to dollar signs
   clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$$${math}$$`);
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math}$`);
 
-  // 2. 수식 기호($) 밖으로 튀어나온 \text{...} 텍스트 추출 복구
+  // 2. Clean unescaped raw LaTeX commands outside math tags
   clean = clean.replace(/(?<!\$)\\text\{([^}]+)\}(?!\$)/g, "$1");
   clean = clean.replace(/(?<!\$)\\quad(?!\$)/g, " ");
   clean = clean.replace(/(?<!\$)\\,(?!\$)/g, " ");
   clean = clean.replace(/(?<!\$)\\%(?!\$)/g, "%");
 
-  // 3. 닫히지 않았거나 중복 생성된 $$ 정리
+  // 3. Fix nested/duplicated math delimiters
   clean = clean.replace(/\$\$\s*\$\$/g, "$$");
   clean = clean.replace(/\{(\$\$|\$)(.*?)\1\}/g, "{$2}");
 
@@ -159,7 +158,7 @@ export default function ChatJEEPTPage() {
   const activeTutor = TUTOR_INFO[subject];
 
   const handleNewChat = () => {
-    if (confirm("대화 기록을 비우고 새 대화를 시작할까요?")) {
+    if (confirm("Are you sure you want to clear the conversation history and start a fresh session?")) {
       setMessages([]);
       localStorage.removeItem("chatjeept_history");
     }
@@ -214,7 +213,7 @@ export default function ChatJEEPTPage() {
         ...prev,
         {
           role: "assistant",
-          content: `⚠️ 오류: ${err.message || "연결 오류가 발생했습니다."}`,
+          content: `⚠️ Error: ${err.message || "Failed to reach the server. Please check your connection."}`,
           tutor: activeTutor.name,
         },
       ]);
@@ -290,8 +289,8 @@ export default function ChatJEEPTPage() {
               </div>
             </div>
             <p className="text-sm text-slate-300 leading-relaxed">
-              Hello! I will guide you through rigorous <strong>{subject}</strong> concepts for IIT-JEE Advanced.
-              Ask any theoretical doubt, numerical problem, or archival question.
+              Hello! I am your IIT-JEE Master Tutor in <strong>{subject}</strong>. 
+              Ask any conceptual doubt, derivation, numerical problem, or past archival JEE Advanced question.
             </p>
           </div>
         )}

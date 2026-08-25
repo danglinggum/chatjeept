@@ -112,7 +112,7 @@ class ChatRequest(BaseModel):
 # FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="8.3.0")
+app = FastAPI(title="ChatJEEPT API", version="8.4.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -130,21 +130,21 @@ app.add_middleware(
 
 SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
-Provide rigorous, step-by-step mathematical and chemical derivations.
+You MUST communicate STRICTLY in English with rigorous academic precision.
 
-STRICT FORMATTING RULES:
-1. NEVER output raw LaTeX commands like \\text{}, \\,, or \\% in plain prose or bullet points.
-   - BAD: \\text{Equatorial orbitals } ($sp^2$): 33.3\\% \\text{ } s\\text{-character}
-   - GOOD: * **Equatorial orbitals** ($sp^2$): 33.3% $s$-character, 66.7% $p$-character
-2. Wrap ONLY actual formulas/chemical symbols in single dollar signs: e.g., `$sp^3d$`, `$\\text{SF}_4$`, `$120^\\circ$`, `$Z = 5$`.
-3. Wrap standalone multi-line equations in double dollar signs: `$$ ... $$`.
+CRITICAL FORMATTING RULES:
+1. ALWAYS output your complete explanation in English.
+2. NEVER output raw LaTeX commands like \\text{}, \\,, or \\% in plain prose or bullet points.
+   - Example: * **Equatorial orbitals** ($sp^2$): 33.3% $s$-character, 66.7% $p$-character
+3. Wrap ONLY actual formulas/chemical symbols in single dollar signs: `$sp^3d$`, `$\\text{SF}_4$`, `$120^\\circ$`.
+4. Wrap standalone equations in double dollar signs: `$$ ... $$`.
 
 CRITICAL 3D VISUALIZATION DIRECTIVE:
-Whenever geometry, molecules, vectors, skew lines, or orbitals are discussed, YOU MUST ALWAYS GENERATE A 3D SCENE AT THE VERY END.
-If comparing TWO molecules (e.g., SF4 and ClF3), place Molecule 1 at x = -2.5 and Molecule 2 at x = +2.5 in the same scene.
+Whenever spatial geometry, molecules, vectors, planes, or 3D forces are discussed, ALWAYS generate a 3D scene at the very end.
+If comparing multiple molecules (e.g. SF4 and ClF3), place Molecule 1 at x = -2.5 and Molecule 2 at x = +2.5.
 
 Output format:
-[Your complete, exhaustive explanation and tables here]
+[Your complete, exhaustive explanation in English here]
 
 <<<3D_SCENE>>>
 {
@@ -200,7 +200,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v8.3"}
+    return {"status": "online", "service": "ChatJEEPT API v8.4"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
