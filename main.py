@@ -49,7 +49,7 @@ def check_rate_limit(ip_address: str):
     REQUEST_RECORDS[ip_address].append(now)
 
 # =============================================================================
-# 3. Google GenAI Client & Active Model Pool
+# 3. Google GenAI Client & Verified Model
 # =============================================================================
 
 SCENE_START_MARKER = "<<<3D_SCENE>>>"
@@ -58,7 +58,6 @@ SCENE_END_MARKER = "<<<END_3D_SCENE>>>"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 ai_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
-# 공식 권장 활성 모델
 MODELS_TO_TRY = [
     "gemini-3.6-flash",
 ]
@@ -131,7 +130,7 @@ class ChatRequest(BaseModel):
 # 5. FastAPI App & Open CORS Policy
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT Turbo API", version="9.1.0")
+app = FastAPI(title="ChatJEEPT Turbo API", version="9.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -213,7 +212,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT Turbo API v9.1"}
+    return {"status": "online", "service": "ChatJEEPT Turbo API v9.2"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)
@@ -228,13 +227,11 @@ async def chat_endpoint(request: ChatRequest, req: Request):
 
     tutor = TUTOR_CONFIG[request.subject]
 
-    # 1. 인메모리 캐시 조회 (0.01초 즉시 반환)
     cache_key = f"{request.subject}:{request.mode}:{request.message.strip().lower()}"
     cached_payload = get_from_cache(cache_key)
     if cached_payload:
         return TutorResponse(**cached_payload)
 
-    # 2. 토큰 절약을 위해 최근 1턴 대화만 컨텍스트로 전달
     history_ctx = [{"role": h.role, "content": h.content} for h in request.history[-2:]]
     prompt = f"Subject: {request.subject}\nMode: {request.mode}\nContext: {json.dumps(history_ctx)}\nQuestion: {request.message}"
 
