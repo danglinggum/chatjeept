@@ -1,7 +1,8 @@
 ﻿"use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import dynamic from "next/dynamic";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas } from "@react-three/fiber";
+import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,21 +10,34 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
-const ThreeCanvas = dynamic(() => import("@react-three/fiber").then((mod) => mod.Canvas), { ssr: false });
-const OrbitControls = dynamic(() => import("@react-three/drei").then((mod) => mod.OrbitControls), { ssr: false });
-
 type Subject = "Physics" | "Chemistry" | "Mathematics";
 type TutorMode = "Socratic Hint" | "Full Solution";
+type Vector3Tuple = [number, number, number];
 
-interface SceneElement {
-  kind: "sphere" | "cylinder" | "arrow";
-  position?: [number, number, number];
-  start?: [number, number, number];
-  end?: [number, number, number];
+interface SphereElement {
+  kind: "sphere";
+  position: Vector3Tuple;
   radius?: number;
   color?: string;
-  label?: string;
+  label?: string | null;
 }
+
+interface CylinderElement {
+  kind: "cylinder";
+  start: Vector3Tuple;
+  end: Vector3Tuple;
+  color?: string;
+}
+
+interface ArrowElement {
+  kind: "arrow";
+  start: Vector3Tuple;
+  end: Vector3Tuple;
+  color?: string;
+  label?: string | null;
+}
+
+type SceneElement = SphereElement | CylinderElement | ArrowElement;
 
 interface Scene {
   elements: SceneElement[];
@@ -36,137 +50,361 @@ interface Message {
   tutor?: string;
 }
 
-const TUTOR_INFO: Record<Subject, { name: string; institute: string; spec: string }> = {
-  Physics: { name: "Rahul", institute: "IIT Bombay", spec: "Mechanics · Electromagnetism · 3D Vectors" },
-  Chemistry: { name: "Raj", institute: "IIT Delhi", spec: "VSEPR Geometry · Chemical Bonding · Organic Mechanisms" },
-  Mathematics: { name: "Amit", institute: "IIT Kanpur", spec: "3D Coordinate Geometry · Vectors · Matrices" },
+interface TutorApiResponse {
+  explanation: string;
+  scene: Scene | null;
+  tutor: string;
+  subject: Subject;
+  mode: TutorMode;
+}
+
+const TUTOR_INFO: Record<
+  Subject,
+  { name: string; institute: string; spec: string }
+> = {
+  Physics: {
+    name: "Rahul",
+    institute: "IIT Bombay",
+    spec: "Mechanics · Electromagnetism · 3D Vectors",
+  },
+  Chemistry: {
+    name: "Raj",
+    institute: "IIT Delhi",
+    spec: "VSEPR Geometry · Chemical Bonding · Organic Mechanisms",
+  },
+  Mathematics: {
+    name: "Amit",
+    institute: "IIT Kanpur",
+    spec: "3D Coordinate Geometry · Vectors · Matrices",
+  },
 };
 
-function resolveBackendUrl(): string {
-  let raw = process.env.NEXT_PUBLIC_API_URL || "https://chatjeept.onrender.com";
-  const mdMatch = raw.match(/\((https?:\/\/[^\)]+)\)/);
-  if (mdMatch) raw = mdMatch[1];
-  raw = raw.replace(/["'\[\]]/g, "").trim().replace(/\/+$/, "");
-  if (!raw.startsWith("http")) return "https://chatjeept.onrender.com";
-  return raw;
-}
+const BACKEND_URL = (
+  process.env.NEXT_PUBLIC_API_URL ?? "https://chatjeept.onrender.com"
+)
+  .trim()
+  .replace(/^['"]|['"]$/g, "")
+  .replace(/\/+$/, "");
 
-const BACKEND_URL = resolveBackendUrl();
+const HISTORY_STORAGE_KEY = "chatjeept_history_v10";
 
-// Truncated/broken math auto-repair engine
-function normalizeMath(text: string): string {
+function prepareMarkdown(text: string): string {
   if (!text) return "";
-  let clean = text.split("<<<3D_SCENE>>>")[0].trim();
 
-  // 1. Remove dangling unfinished LaTeX commands at the very end (e.g. $$\mathbf{\bar{ )
-  clean = clean.replace(/\$\$\s*\\[a-zA-Z]+\s*\{?[^$\n]*$/g, "");
-  clean = clean.replace(/\$\s*\\[a-zA-Z]+\s*\{?[^$\n]*$/g, "");
-
-  // 2. Standardize bracket math to dollar signs
-  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n\n$$\n${math.trim()}\n$$\n\n`);
-  clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`);
-
-  // 3. Ensure aligned and cases blocks are properly closed if cut off
-  if (clean.includes("\\begin{aligned}") && !clean.includes("\\end{aligned}")) {
-    clean += "\n\\end{aligned}\n$$";
-  }
-  if (clean.includes("\\begin{cases}") && !clean.includes("\\end{cases}")) {
-    clean += "\n\\end{cases}\n$$";
-  }
-
-  // 4. Auto-close single unclosed $$ at the end
-  const doubleDollarCount = (clean.match(/\$\$/g) || []).length;
-  if (doubleDollarCount % 2 !== 0) {
-    clean += "\n$$";
-  }
-
-  // 5. Space inline math cleanly
-  clean = clean.replace(/([a-zA-Z0-9])\$([^\$\n]+)\$([a-zA-Z0-9])/g, "$1 $$2$ $3");
-  clean = clean.replace(/([a-zA-Z0-9])\$([^\$\n]+)\$/g, "$1 $$2$");
-  clean = clean.replace(/\$([^\$\n]+)\$([a-zA-Z0-9])/g, "$$1$ $2");
-
-  return clean;
+  // The backend already separates explanation and scene. Do not attempt to
+  // delete, auto-close, or rewrite arbitrary LaTeX here. Only convert the two
+  // standard LaTeX delimiters that remark-math does not parse by default.
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => {
+      return `\n\n$$\n${math.trim()}\n$$\n\n`;
+    })
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => {
+      return `$${math.trim()}$`;
+    });
 }
 
-function CylinderSegment({ start, end, color }: { start: [number, number, number]; end: [number, number, number]; color?: string }) {
-  const p1 = new THREE.Vector3(...start);
-  const p2 = new THREE.Vector3(...end);
-  const length = p1.distanceTo(p2);
-  if (length < 0.001) return null;
+function isVector3(value: unknown): value is Vector3Tuple {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate))
+  );
+}
 
-  const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
-  const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
-  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+function normalizeScene(value: unknown): Scene | null {
+  if (!value || typeof value !== "object") return null;
+
+  const rawElements = (value as { elements?: unknown }).elements;
+  if (!Array.isArray(rawElements)) return null;
+
+  const elements: SceneElement[] = [];
+
+  for (const rawElement of rawElements.slice(0, 30)) {
+    if (!rawElement || typeof rawElement !== "object") continue;
+
+    const element = rawElement as Record<string, unknown>;
+    const color =
+      typeof element.color === "string" && /^#[0-9a-fA-F]{6}$/.test(element.color)
+        ? element.color
+        : undefined;
+    const label = typeof element.label === "string" ? element.label.slice(0, 100) : null;
+
+    if (element.kind === "sphere" && isVector3(element.position)) {
+      elements.push({
+        kind: "sphere",
+        position: element.position,
+        radius:
+          typeof element.radius === "number" && element.radius > 0
+            ? Math.min(element.radius, 5)
+            : 0.35,
+        color,
+        label,
+      });
+      continue;
+    }
+
+    if (
+      element.kind === "cylinder" &&
+      isVector3(element.start) &&
+      isVector3(element.end)
+    ) {
+      elements.push({
+        kind: "cylinder",
+        start: element.start,
+        end: element.end,
+        color,
+      });
+      continue;
+    }
+
+    if (element.kind === "arrow" && isVector3(element.start) && isVector3(element.end)) {
+      elements.push({
+        kind: "arrow",
+        start: element.start,
+        end: element.end,
+        color,
+        label,
+      });
+    }
+  }
+
+  return elements.length > 0 ? { elements } : null;
+}
+
+function SceneLabel({
+  text,
+  position,
+}: {
+  text: string;
+  position: Vector3Tuple;
+}) {
+  return (
+    <Html position={position} center distanceFactor={8} style={{ pointerEvents: "none" }}>
+      <span className="whitespace-nowrap rounded-md border border-white/20 bg-slate-950/90 px-2 py-1 text-[11px] font-bold text-white shadow-xl">
+        {text}
+      </span>
+    </Html>
+  );
+}
+
+function CylinderSegment({
+  start,
+  end,
+  color,
+}: {
+  start: Vector3Tuple;
+  end: Vector3Tuple;
+  color?: string;
+}) {
+  const transform = useMemo(() => {
+    const p1 = new THREE.Vector3(...start);
+    const p2 = new THREE.Vector3(...end);
+    const difference = p2.clone().sub(p1);
+    const length = difference.length();
+
+    if (length < 0.001) return null;
+
+    const midpoint = p1.clone().add(p2).multiplyScalar(0.5);
+    const direction = difference.normalize();
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      direction,
+    );
+
+    return { length, midpoint, quaternion };
+  }, [start, end]);
+
+  if (!transform) return null;
 
   return (
-    <mesh position={mid} quaternion={quat}>
-      <cylinderGeometry args={[0.06, 0.06, length, 16]} />
-      <meshStandardMaterial color={color || "#94a3b8"} roughness={0.4} />
+    <mesh position={transform.midpoint} quaternion={transform.quaternion} castShadow receiveShadow>
+      <cylinderGeometry args={[0.06, 0.06, transform.length, 20]} />
+      <meshStandardMaterial color={color ?? "#94a3b8"} roughness={0.4} />
     </mesh>
   );
 }
 
-function VectorArrow({ start, end, color }: { start: [number, number, number]; end: [number, number, number]; color?: string }) {
-  const p1 = new THREE.Vector3(...start);
-  const p2 = new THREE.Vector3(...end);
-  const totalLen = p1.distanceTo(p2);
-  if (totalLen < 0.001) return null;
+function VectorArrow({
+  start,
+  end,
+  color,
+  label,
+}: {
+  start: Vector3Tuple;
+  end: Vector3Tuple;
+  color?: string;
+  label?: string | null;
+}) {
+  const geometry = useMemo(() => {
+    const p1 = new THREE.Vector3(...start);
+    const p2 = new THREE.Vector3(...end);
+    const difference = p2.clone().sub(p1);
+    const totalLength = difference.length();
 
-  const coneLen = Math.min(0.4, totalLen * 0.35);
-  const shaftLen = totalLen - coneLen;
-  const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
-  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    if (totalLength < 0.001) return null;
 
-  const shaftMid = new THREE.Vector3().copy(p1).addScaledVector(dir, shaftLen * 0.5);
-  const tipPos = new THREE.Vector3().copy(p1).addScaledVector(dir, shaftLen + coneLen * 0.5);
+    const direction = difference.normalize();
+    const coneLength = Math.min(0.45, Math.max(0.16, totalLength * 0.25));
+    const shaftLength = Math.max(0.001, totalLength - coneLength);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      direction,
+    );
+    const shaftMidpoint = p1.clone().addScaledVector(direction, shaftLength * 0.5);
+    const coneMidpoint = p1
+      .clone()
+      .addScaledVector(direction, shaftLength + coneLength * 0.5);
+    const labelPosition = p1.clone().add(p2).multiplyScalar(0.5);
+    labelPosition.y += 0.25;
+
+    return {
+      coneLength,
+      shaftLength,
+      quaternion,
+      shaftMidpoint,
+      coneMidpoint,
+      labelPosition: labelPosition.toArray() as Vector3Tuple,
+    };
+  }, [start, end]);
+
+  if (!geometry) return null;
 
   return (
     <group>
-      <mesh position={shaftMid} quaternion={quat}>
-        <cylinderGeometry args={[0.05, 0.05, shaftLen, 16]} />
-        <meshStandardMaterial color={color || "#f97316"} />
+      <mesh position={geometry.shaftMidpoint} quaternion={geometry.quaternion} castShadow>
+        <cylinderGeometry args={[0.045, 0.045, geometry.shaftLength, 18]} />
+        <meshStandardMaterial color={color ?? "#f97316"} />
       </mesh>
-      <mesh position={tipPos} quaternion={quat}>
-        <coneGeometry args={[0.13, coneLen, 16]} />
-        <meshStandardMaterial color={color || "#f97316"} />
+      <mesh position={geometry.coneMidpoint} quaternion={geometry.quaternion} castShadow>
+        <coneGeometry args={[0.13, geometry.coneLength, 18]} />
+        <meshStandardMaterial color={color ?? "#f97316"} />
       </mesh>
+      {label ? <SceneLabel text={label} position={geometry.labelPosition} /> : null}
     </group>
   );
 }
 
+function getSceneView(scene: Scene) {
+  const box = new THREE.Box3();
+  let hasPoint = false;
+
+  const expand = (point: Vector3Tuple) => {
+    box.expandByPoint(new THREE.Vector3(...point));
+    hasPoint = true;
+  };
+
+  for (const element of scene.elements) {
+    if (element.kind === "sphere") {
+      expand(element.position);
+    } else {
+      expand(element.start);
+      expand(element.end);
+    }
+  }
+
+  if (!hasPoint || box.isEmpty()) {
+    return {
+      center: [0, 0, 0] as Vector3Tuple,
+      camera: [5, 4, 7] as Vector3Tuple,
+      gridY: -2,
+    };
+  }
+
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z, 2);
+  const distance = Math.min(Math.max(span * 1.8, 5), 18);
+
+  return {
+    center: center.toArray() as Vector3Tuple,
+    camera: [
+      center.x + distance * 0.65,
+      center.y + distance * 0.55,
+      center.z + distance,
+    ] as Vector3Tuple,
+    gridY: box.min.y - 0.6,
+  };
+}
+
 function SceneRenderer({ scene }: { scene: Scene }) {
-  if (!scene || !scene.elements || scene.elements.length === 0) return null;
+  const view = useMemo(() => getSceneView(scene), [scene]);
+
+  if (!scene.elements.length) return null;
 
   return (
-    <div className="w-full h-84 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative shadow-inner my-4">
-      <div className="absolute top-3 left-3 z-10 bg-slate-900/90 border border-slate-700/80 px-3 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300 shadow">
-        🎮 3D Spatial Vector Setup (Drag to Rotate / Scroll to Zoom)
+    <div className="relative my-4 h-[340px] w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-inner">
+      <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-lg border border-slate-700/80 bg-slate-900/90 px-3 py-1 text-[11px] font-bold text-cyan-300 shadow">
+        🎮 Interactive 3D View · Drag to rotate · Scroll to zoom
       </div>
-      <ThreeCanvas camera={{ position: [0, 3, 7], fov: 48 }}>
-        <ambientLight intensity={1.5} />
-        <pointLight position={[10, 10, 10]} intensity={1.5} />
-        <directionalLight position={[-5, 5, 5]} intensity={0.8} />
-        <OrbitControls makeDefault />
-        <gridHelper args={[12, 12, "#334155", "#1e293b"]} position={[0, -2, 0]} />
 
-        {scene.elements.map((el, idx) => {
-          if (el.kind === "sphere" && el.position) {
+      <Canvas shadows camera={{ position: view.camera, fov: 48, near: 0.1, far: 100 }}>
+        <color attach="background" args={["#07101f"]} />
+        <ambientLight intensity={1.35} />
+        <directionalLight position={[8, 10, 7]} intensity={2} castShadow />
+        <directionalLight position={[-6, 4, -5]} intensity={0.8} color="#60a5fa" />
+        <OrbitControls
+          makeDefault
+          target={view.center}
+          enableDamping
+          dampingFactor={0.08}
+          minDistance={2}
+          maxDistance={30}
+        />
+        <gridHelper
+          args={[14, 14, "#334155", "#1e293b"]}
+          position={[view.center[0], view.gridY, view.center[2]]}
+        />
+
+        {scene.elements.map((element, index) => {
+          if (element.kind === "sphere") {
+            const radius = element.radius ?? 0.35;
             return (
-              <mesh key={idx} position={el.position}>
-                <sphereGeometry args={[el.radius || 0.3, 32, 32]} />
-                <meshStandardMaterial color={el.color || "#60a5fa"} roughness={0.3} metalness={0.2} />
-              </mesh>
+              <group key={`sphere-${index}`}>
+                <mesh position={element.position} castShadow receiveShadow>
+                  <sphereGeometry args={[radius, 36, 36]} />
+                  <meshStandardMaterial
+                    color={element.color ?? "#60a5fa"}
+                    roughness={0.3}
+                    metalness={0.15}
+                  />
+                </mesh>
+                {element.label ? (
+                  <SceneLabel
+                    text={element.label}
+                    position={[
+                      element.position[0],
+                      element.position[1] + radius + 0.28,
+                      element.position[2],
+                    ]}
+                  />
+                ) : null}
+              </group>
             );
           }
-          if (el.kind === "cylinder" && el.start && el.end) {
-            return <CylinderSegment key={idx} start={el.start} end={el.end} color={el.color} />;
+
+          if (element.kind === "cylinder") {
+            return (
+              <CylinderSegment
+                key={`cylinder-${index}`}
+                start={element.start}
+                end={element.end}
+                color={element.color}
+              />
+            );
           }
-          if (el.kind === "arrow" && el.start && el.end) {
-            return <VectorArrow key={idx} start={el.start} end={el.end} color={el.color} />;
-          }
-          return null;
+
+          return (
+            <VectorArrow
+              key={`arrow-${index}`}
+              start={element.start}
+              end={element.end}
+              color={element.color}
+              label={element.label}
+            />
+          );
         })}
-      </ThreeCanvas>
+      </Canvas>
     </div>
   );
 }
@@ -181,21 +419,25 @@ export default function ChatJEEPTPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("chatjeept_history");
+    const saved = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+
     if (saved) {
       try {
-        setMessages(JSON.parse(saved));
-      } catch (e) {
-        console.error(e);
+        const parsed = JSON.parse(saved) as unknown;
+        if (Array.isArray(parsed)) {
+          setMessages(parsed as Message[]);
+        }
+      } catch {
+        window.localStorage.removeItem(HISTORY_STORAGE_KEY);
       }
     }
+
     setIsLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem("chatjeept_history", JSON.stringify(messages));
-    }
+    if (!isLoaded) return;
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(messages));
   }, [messages, isLoaded]);
 
   useEffect(() => {
@@ -205,63 +447,84 @@ export default function ChatJEEPTPage() {
   const activeTutor = TUTOR_INFO[subject];
 
   const handleNewChat = () => {
-    if (confirm("Are you sure you want to clear the conversation history and start a fresh session?")) {
+    const shouldClear = window.confirm(
+      "Are you sure you want to clear the conversation history and start a fresh session?",
+    );
+
+    if (shouldClear) {
       setMessages([]);
-      localStorage.removeItem("chatjeept_history");
+      window.localStorage.removeItem(HISTORY_STORAGE_KEY);
     }
   };
 
-  const handleSend = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!input.trim() || loading) return;
+  const handleSend = async (event?: React.FormEvent) => {
+    event?.preventDefault();
 
     const userText = input.trim();
-    setInput("");
+    if (!userText || loading) return;
 
-    const newHistory: Message[] = [...messages, { role: "user", content: userText }];
-    setMessages(newHistory);
+    // Send only previous turns as history. The current question is already in
+    // the `message` field and must not be duplicated in `history`.
+    const previousHistory = messages.slice(-20).map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+
+    const userMessage: Message = { role: "user", content: userText, scene: null };
+    setMessages((current) => [...current, userMessage]);
+    setInput("");
     setLoading(true);
 
-    const requestUrl = `${BACKEND_URL}/api/chat`;
-
     try {
-      const res = await fetch(requestUrl, {
+      const response = await fetch(`${BACKEND_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userText,
-          subject: subject,
-          mode: mode,
-          history: newHistory.map((m) => ({ role: m.role, content: m.content })),
+          subject,
+          mode,
+          history: previousHistory,
         }),
       });
 
-      if (!res.ok) {
-        let errDetail = `HTTP ${res.status}`;
-        try {
-          const errData = await res.json();
-          if (errData.detail) errDetail = errData.detail;
-        } catch (_) {}
-        throw new Error(errDetail);
+      const responseText = await response.text();
+      let data: TutorApiResponse | { detail?: string };
+
+      try {
+        data = JSON.parse(responseText) as TutorApiResponse | { detail?: string };
+      } catch {
+        throw new Error(`Invalid server response (HTTP ${response.status})`);
       }
 
-      const data = await res.json();
-      setMessages((prev) => [
-        ...prev,
+      if (!response.ok) {
+        const detail =
+          "detail" in data && typeof data.detail === "string"
+            ? data.detail
+            : `HTTP ${response.status}`;
+        throw new Error(detail);
+      }
+
+      if (!("explanation" in data) || typeof data.explanation !== "string") {
+        throw new Error("The server response does not contain an explanation.");
+      }
+
+      const assistantMessage: Message = {
+        role: "assistant",
+        content: data.explanation,
+        scene: normalizeScene(data.scene),
+        tutor: typeof data.tutor === "string" ? data.tutor : activeTutor.name,
+      };
+
+      setMessages((current) => [...current, assistantMessage]);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown connection error";
+      setMessages((current) => [
+        ...current,
         {
           role: "assistant",
-          content: data.explanation,
-          scene: data.scene,
-          tutor: data.tutor,
-        },
-      ]);
-    } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `⚠️ Error: ${err.message || "Failed to reach the server. Please check your connection."}`,
+          content: `⚠️ Error: ${errorMessage}`,
           tutor: activeTutor.name,
+          scene: null,
         },
       ]);
     } finally {
@@ -270,161 +533,182 @@ export default function ChatJEEPTPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      <header className="h-16 border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 flex items-center justify-between sticky top-0 z-30">
+    <main className="flex min-h-screen flex-col bg-slate-950 font-sans text-slate-100">
+      <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/80 px-4 py-3 backdrop-blur md:px-6">
         <div className="flex items-center gap-3">
-          <span className="text-xl font-black bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-xl font-black text-transparent">
             ChatJEEPT
           </span>
-          <span className="text-[11px] bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded-full font-bold">
+          <span className="rounded-full border border-cyan-800 bg-cyan-950 px-2 py-0.5 text-[11px] font-bold text-cyan-300">
             3D AI Tutor
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 md:gap-3">
           <button
+            type="button"
             onClick={handleNewChat}
-            className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-xl font-bold transition"
+            disabled={loading}
+            className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:bg-slate-700 disabled:opacity-50"
           >
             ➕ New Chat
           </button>
 
           <select
             value={subject}
-            onChange={(e) => setSubject(e.target.value as Subject)}
-            className="bg-slate-800 border border-slate-700 text-xs rounded-xl px-3 py-1.5 font-bold text-slate-200 focus:outline-none"
+            disabled={loading}
+            onChange={(event) => setSubject(event.target.value as Subject)}
+            className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-200 outline-none focus:border-cyan-500 disabled:opacity-50"
           >
             <option value="Physics">Physics — Rahul (IIT Bombay)</option>
             <option value="Chemistry">Chemistry — Raj (IIT Delhi)</option>
             <option value="Mathematics">Mathematics — Amit (IIT Kanpur)</option>
           </select>
 
-          <div className="flex bg-slate-800 p-0.5 rounded-xl border border-slate-700">
-            <button
-              onClick={() => setMode("Socratic Hint")}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition ${
-                mode === "Socratic Hint" ? "bg-cyan-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Socratic Hint
-            </button>
-            <button
-              onClick={() => setMode("Full Solution")}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition ${
-                mode === "Full Solution" ? "bg-cyan-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Full Solution
-            </button>
+          <div className="flex rounded-xl border border-slate-700 bg-slate-800 p-0.5">
+            {(["Socratic Hint", "Full Solution"] as TutorMode[]).map((item) => (
+              <button
+                key={item}
+                type="button"
+                disabled={loading}
+                onClick={() => setMode(item)}
+                className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
+                  mode === item
+                    ? "bg-cyan-500 text-slate-950 shadow"
+                    : "text-slate-400 hover:text-white"
+                } disabled:opacity-50`}
+              >
+                {item}
+              </button>
+            ))}
           </div>
         </div>
       </header>
 
-      <div className="flex-1 max-w-5xl w-full mx-auto p-4 md:p-6 overflow-y-auto space-y-6">
-        {messages.length === 0 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-4 shadow-xl">
+      <div className="mx-auto w-full max-w-5xl flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
+        {messages.length === 0 ? (
+          <div className="space-y-4 rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-xl md:p-8">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-black text-lg border border-cyan-500/40">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-500/40 bg-cyan-500/20 text-lg font-black text-cyan-400">
                 {activeTutor.name[0]}
               </div>
               <div>
                 <h2 className="text-base font-black text-white">
                   Master {activeTutor.name}{" "}
-                  <span className="text-xs font-normal text-slate-400">({activeTutor.institute})</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    ({activeTutor.institute})
+                  </span>
                 </h2>
-                <p className="text-xs text-cyan-400 font-mono">{activeTutor.spec}</p>
+                <p className="font-mono text-xs text-cyan-400">{activeTutor.spec}</p>
               </div>
             </div>
-            <p className="text-sm text-slate-300 leading-relaxed">
-              Hello! I am your IIT-JEE Master Tutor in <strong>{subject}</strong>. 
-              Ask any conceptual doubt, derivation, numerical problem, or past archival JEE Advanced question.
+            <p className="text-sm leading-relaxed text-slate-300">
+              Hello! I am your IIT-JEE Master Tutor in <strong>{subject}</strong>. Ask any
+              conceptual doubt, derivation, numerical problem, or JEE Advanced question.
             </p>
           </div>
-        )}
+        ) : null}
 
-        {messages.map((msg, idx) => (
+        {messages.map((message, index) => (
           <div
-            key={idx}
-            className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"} space-y-2`}
+            key={`${message.role}-${index}`}
+            className={`flex flex-col space-y-2 ${
+              message.role === "user" ? "items-end" : "items-start"
+            }`}
           >
             <div
-              className={`max-w-[88%] rounded-3xl p-5 ${
-                msg.role === "user"
-                  ? "bg-cyan-500 text-slate-950 font-medium rounded-br-none shadow-lg shadow-cyan-500/20"
-                  : "bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none shadow-xl"
+              className={`max-w-[92%] rounded-3xl p-5 md:max-w-[88%] ${
+                message.role === "user"
+                  ? "rounded-br-none bg-cyan-500 font-medium text-slate-950 shadow-lg shadow-cyan-500/20"
+                  : "rounded-bl-none border border-slate-800 bg-slate-900 text-slate-100 shadow-xl"
               }`}
             >
-              {msg.role === "assistant" && (
-                <div className="text-xs font-mono font-bold text-cyan-400 mb-2">
-                  🎓 Master {msg.tutor || activeTutor.name}
+              {message.role === "assistant" ? (
+                <div className="mb-2 font-mono text-xs font-bold text-cyan-400">
+                  🎓 Master {message.tutor ?? activeTutor.name}
                 </div>
-              )}
+              ) : null}
 
-              {msg.role === "user" ? (
-                <div className="text-sm font-sans">{msg.content}</div>
+              {message.role === "user" ? (
+                <div className="whitespace-pre-wrap text-sm">{message.content}</div>
               ) : (
-                <div className="space-y-3 leading-relaxed text-sm text-slate-200">
+                <div className="space-y-3 text-sm leading-relaxed text-slate-200 [&_.katex-display]:overflow-x-auto">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkMath]}
-                    rehypePlugins={[
-                      [
-                        rehypeKatex,
-                        {
-                          throwOnError: false,
-                          strict: false,
-                        },
-                      ],
-                    ]}
+                    rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
                     components={{
                       table: ({ ...props }) => (
-                        <div className="overflow-x-auto my-4 rounded-xl border border-slate-800 bg-slate-950/80 shadow-md">
-                          <table className="w-full text-left text-xs text-slate-200 divide-y divide-slate-800" {...props} />
+                        <div className="my-4 overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/80 shadow-md">
+                          <table
+                            className="w-full divide-y divide-slate-800 text-left text-xs text-slate-200"
+                            {...props}
+                          />
                         </div>
                       ),
-                      thead: ({ ...props }) => <thead className="bg-slate-800/90 font-bold text-cyan-400" {...props} />,
-                      th: ({ ...props }) => <th className="px-4 py-2.5 font-bold border-b border-slate-700" {...props} />,
-                      td: ({ ...props }) => <td className="px-4 py-2 border-b border-slate-800/60 font-mono text-slate-300" {...props} />,
-                      h1: ({ ...props }) => <h1 className="text-lg font-black text-cyan-400 mt-4 mb-2" {...props} />,
-                      h2: ({ ...props }) => <h2 className="text-base font-bold text-cyan-300 mt-3 mb-2" {...props} />,
-                      h3: ({ ...props }) => <h3 className="text-sm font-bold text-cyan-200 mt-3 mb-1" {...props} />,
-                      p: ({ ...props }) => <p className="mb-2 leading-relaxed text-sm text-slate-200" {...props} />,
-                      strong: ({ ...props }) => <strong className="font-bold text-white tracking-wide" {...props} />,
+                      thead: ({ ...props }) => (
+                        <thead className="bg-slate-800/90 font-bold text-cyan-400" {...props} />
+                      ),
+                      th: ({ ...props }) => (
+                        <th
+                          className="border-b border-slate-700 px-4 py-2.5 font-bold"
+                          {...props}
+                        />
+                      ),
+                      td: ({ ...props }) => (
+                        <td className="border-b border-slate-800/60 px-4 py-2 text-slate-300" {...props} />
+                      ),
+                      h1: ({ ...props }) => (
+                        <h1 className="mb-2 mt-4 text-lg font-black text-cyan-400" {...props} />
+                      ),
+                      h2: ({ ...props }) => (
+                        <h2 className="mb-2 mt-3 text-base font-bold text-cyan-300" {...props} />
+                      ),
+                      h3: ({ ...props }) => (
+                        <h3 className="mb-1 mt-3 text-sm font-bold text-cyan-200" {...props} />
+                      ),
+                      p: ({ ...props }) => (
+                        <p className="mb-2 text-sm leading-relaxed text-slate-200" {...props} />
+                      ),
+                      strong: ({ ...props }) => (
+                        <strong className="font-bold tracking-wide text-white" {...props} />
+                      ),
                       hr: ({ ...props }) => <hr className="my-4 border-slate-800" {...props} />,
                     }}
                   >
-                    {normalizeMath(msg.content)}
+                    {prepareMarkdown(message.content)}
                   </ReactMarkdown>
                 </div>
               )}
 
-              {msg.scene && msg.scene.elements && msg.scene.elements.length > 0 && (
-                <SceneRenderer scene={msg.scene} />
-              )}
+              {message.scene ? <SceneRenderer scene={message.scene} /> : null}
             </div>
           </div>
         ))}
 
-        {loading && (
-          <div className="flex items-center gap-3 text-xs font-mono text-cyan-400 bg-slate-900/60 border border-slate-800/80 px-4 py-3 rounded-2xl w-fit">
-            <span className="animate-spin">⚙️</span> Calculating derivations and generating 3D setup...
+        {loading ? (
+          <div className="flex w-fit items-center gap-3 rounded-2xl border border-slate-800/80 bg-slate-900/60 px-4 py-3 font-mono text-xs text-cyan-400">
+            <span className="animate-spin">⚙️</span>
+            Calculating derivations and generating the 3D scene...
           </div>
-        )}
+        ) : null}
+
         <div ref={chatEndRef} />
       </div>
 
-      <footer className="border-t border-slate-800 bg-slate-900/80 backdrop-blur p-4 sticky bottom-0 z-30">
-        <form onSubmit={handleSend} className="max-w-5xl mx-auto flex gap-3">
+      <footer className="sticky bottom-0 z-30 border-t border-slate-800 bg-slate-900/90 p-4 backdrop-blur">
+        <form onSubmit={handleSend} className="mx-auto flex max-w-5xl gap-3">
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            disabled={loading}
+            onChange={(event) => setInput(event.target.value)}
             placeholder={`Ask Master ${activeTutor.name} a ${subject} question...`}
-            className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl px-5 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans shadow-inner"
+            className="flex-1 rounded-2xl border border-slate-800 bg-slate-950 px-5 py-3.5 text-sm text-white shadow-inner outline-none placeholder:text-slate-500 focus:border-cyan-500 disabled:opacity-60"
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-slate-950 px-6 py-3.5 rounded-2xl text-sm font-black transition shadow-lg shadow-cyan-400/20"
+            className="rounded-2xl bg-cyan-400 px-6 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-cyan-400/20 transition hover:bg-cyan-300 disabled:opacity-50"
           >
             Send
           </button>
