@@ -112,7 +112,7 @@ class ChatRequest(BaseModel):
 # FastAPI Core App
 # =============================================================================
 
-app = FastAPI(title="ChatJEEPT API", version="8.2.0")
+app = FastAPI(title="ChatJEEPT API", version="8.3.0")
 
 ALLOWED_ORIGINS = [
     "https://chatjeept-iota.vercel.app",
@@ -132,31 +132,23 @@ SYSTEM_INSTRUCTION = """
 You are an elite IIT-JEE Master Tutor (Rahul: Physics, Raj: Chemistry, Amit: Mathematics).
 Provide rigorous, step-by-step mathematical and chemical derivations.
 
-CRITICAL FORMATTING RULES:
-1. Wrap ALL formulas, variables, and units cleanly in standard LaTeX: `$ ... $` for inline, `$$ ... $$` for block formulas.
-2. NEVER nest dollar signs inside other dollar signs (e.g. do NOT write `$\\text{F}_{$$\\text{eq}}$`).
+STRICT FORMATTING RULES:
+1. NEVER output raw LaTeX commands like \\text{}, \\,, or \\% in plain prose or bullet points.
+   - BAD: \\text{Equatorial orbitals } ($sp^2$): 33.3\\% \\text{ } s\\text{-character}
+   - GOOD: * **Equatorial orbitals** ($sp^2$): 33.3% $s$-character, 66.7% $p$-character
+2. Wrap ONLY actual formulas/chemical symbols in single dollar signs: e.g., `$sp^3d$`, `$\\text{SF}_4$`, `$120^\\circ$`, `$Z = 5$`.
+3. Wrap standalone multi-line equations in double dollar signs: `$$ ... $$`.
 
 CRITICAL 3D VISUALIZATION DIRECTIVE:
 Whenever geometry, molecules, vectors, skew lines, or orbitals are discussed, YOU MUST ALWAYS GENERATE A 3D SCENE AT THE VERY END.
-
-MULTI-OBJECT / COMPARISON RULE:
-If the user asks to compare or render TWO or MORE molecules/structures (e.g., SF4 and ClF3), render BOTH in the SAME scene by offsetting their X coordinates:
-- Place Molecule 1 centered at x = -2.5
-- Place Molecule 2 centered at x = +2.5
+If comparing TWO molecules (e.g., SF4 and ClF3), place Molecule 1 at x = -2.5 and Molecule 2 at x = +2.5 in the same scene.
 
 Output format:
 [Your complete, exhaustive explanation and tables here]
 
 <<<3D_SCENE>>>
 {
-  "elements": [
-    {"kind": "sphere", "position": [-2.5, 0, 0], "radius": 0.4, "color": "#f59e0b", "label": "S (SF4)"},
-    {"kind": "sphere", "position": [-2.5, 1.4, 0], "radius": 0.25, "color": "#10b981", "label": "F_ax"},
-    {"kind": "cylinder", "start": [-2.5, 0, 0], "end": [-2.5, 1.4, 0], "color": "#94a3b8"},
-    {"kind": "sphere", "position": [2.5, 0, 0], "radius": 0.4, "color": "#06b6d4", "label": "Cl (ClF3)"},
-    {"kind": "sphere", "position": [2.5, 1.4, 0], "radius": 0.25, "color": "#10b981", "label": "F_ax"},
-    {"kind": "cylinder", "start": [2.5, 0, 0], "end": [2.5, 1.4, 0], "color": "#94a3b8"}
-  ]
+  "elements": [ ... ]
 }
 <<<END_3D_SCENE>>>
 """.strip()
@@ -171,7 +163,6 @@ def parse_json_defensively(value: str) -> Any | None:
     e_idx = cleaned.rfind("}")
     if s_idx != -1 and e_idx > s_idx:
         cleaned = cleaned[s_idx:e_idx+1]
-    # trailing comma 정리
     cleaned = re.sub(r",\s*([\]}])", r"\1", cleaned)
     try:
         return json.loads(cleaned)
@@ -209,7 +200,7 @@ def generate_ai(model_name: str, prompt: str):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "ChatJEEPT API v8.2"}
+    return {"status": "online", "service": "ChatJEEPT API v8.3"}
 
 @app.post("/api/chat", response_model=TutorResponse)
 @app.post("/api/chat/", response_model=TutorResponse)

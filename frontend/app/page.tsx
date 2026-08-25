@@ -52,15 +52,24 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
+// 노출된 raw LaTeX 문법을 완전히 복구하여 깔끔한 텍스트/수식으로 변환
 function normalizeMath(text: string): string {
   let clean = text.split("<<<3D_SCENE>>>")[0].trim();
-  // \[ ... \] -> $$ ... $$
+
+  // 1. 대괄호/소괄호 수식 표준화
   clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$$${math}$$`);
-  // \( ... \) -> $ ... $
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math}$`);
-  // 중복 생성된 $$ 정리 ($$ 안에 또 $$ 가 들어가는 버그 방지)
+
+  // 2. 수식 기호($) 밖으로 튀어나온 \text{...} 텍스트 추출 복구
+  clean = clean.replace(/(?<!\$)\\text\{([^}]+)\}(?!\$)/g, "$1");
+  clean = clean.replace(/(?<!\$)\\quad(?!\$)/g, " ");
+  clean = clean.replace(/(?<!\$)\\,(?!\$)/g, " ");
+  clean = clean.replace(/(?<!\$)\\%(?!\$)/g, "%");
+
+  // 3. 닫히지 않았거나 중복 생성된 $$ 정리
   clean = clean.replace(/\$\$\s*\$\$/g, "$$");
   clean = clean.replace(/\{(\$\$|\$)(.*?)\1\}/g, "{$2}");
+
   return clean;
 }
 
